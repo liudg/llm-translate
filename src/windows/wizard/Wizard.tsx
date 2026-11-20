@@ -624,7 +624,10 @@ function Done({ outcome, model, onFinish }: { outcome: LaunchOutcome; model: Mod
       {outcome.fellBack && (
         <p className="mt-3 flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-left text-xs text-amber-800 dark:text-amber-300">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>GPU 启动失败，已改用 CPU 并保存该设置。原因：{outcome.fallbackReason}</span>
+          <span>
+            GPU 启动失败，已改用 CPU 并保存该设置。原因：{outcome.fallbackReason}
+            {model && model.size > 2e9 && "。该模型在 CPU 上较慢，建议重新部署并选择“轻量 · Index-Translate 2B”。"}
+          </span>
         </p>
       )}
       <Button variant="primary" className="mt-6" onClick={onFinish}>

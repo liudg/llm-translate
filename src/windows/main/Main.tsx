@@ -41,7 +41,7 @@ export default function Main() {
   const [source, setSource] = useState("");
   const [result, setResult] = useState("");
   const [dir, setDir] = useState<DirChoice>("auto");
-  const [usedDir, setUsedDir] = useState<Direction | null>(null);
+  const [usedDir, setUsedDir] = useState<Direction | "auto" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState<number | null>(null);
@@ -63,6 +63,7 @@ export default function Main() {
   const run = async () => {
     if (!source.trim()) return;
     const id = ++reqId.current;
+    const auto = dir === "auto";
     setBusy(true);
     setError(null);
     setResult("");
@@ -71,7 +72,7 @@ export default function Main() {
       if (id !== reqId.current) return;
       switch (e.type) {
         case "start":
-          setUsedDir(e.direction);
+          setUsedDir(auto ? "auto" : e.direction);
           break;
         case "delta":
           setResult((r) => r + e.text);
@@ -136,7 +137,7 @@ export default function Main() {
             {error && <div className="text-red-600 dark:text-red-400">{error}</div>}
           </div>
           <div className="flex h-9 items-center gap-2 border-t border-black/5 px-3 text-xs opacity-70 dark:border-white/5">
-            {usedDir && <span>{DIR_LABEL[usedDir]}</span>}
+            {usedDir && <span>{usedDir === "auto" ? "自动（逐段判断方向）" : DIR_LABEL[usedDir]}</span>}
             {elapsed !== null && <span>· {elapsed} ms</span>}
             <button
               className="ml-auto rounded p-1 hover:bg-black/5 disabled:opacity-40 dark:hover:bg-white/10"

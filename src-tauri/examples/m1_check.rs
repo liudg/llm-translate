@@ -168,9 +168,9 @@ async fn infer(models_dir: &Path) {
     assert_eq!(sup.spec().await.unwrap().backend, Backend::Cpu);
     assert_eq!(notices.lock().unwrap().len(), 1);
 
-    println!("[2] GPU translate, multi-paragraph");
+    println!("[2] GPU translate, mixed-language paragraphs (direction per paragraph)");
     sup.configure(spec(Backend::Vulkan, Some("Vulkan0"))).await;
-    let text = "本地翻译模型不依赖网络。\n\n  它对硬件有一定要求。\n今天天气不错。";
+    let text = "本地翻译模型不依赖网络。\n\n  It has certain hardware requirements.\n----\n今天天气不错。";
     let out = std::sync::Mutex::new(String::new());
     tr.translate(TranslateRequest { text: text.into(), direction: None }, |ev| {
         if let TranslateEvent::Delta { text } = &ev {
@@ -181,7 +181,12 @@ async fn infer(models_dir: &Path) {
     })
     .await;
     println!("  -> {:?}", out.lock().unwrap());
-    assert_eq!(out.lock().unwrap().matches('\n').count(), 3);
+    let out = out.into_inner().unwrap();
+    let lines: Vec<&str> = out.split('\n').collect();
+    assert_eq!(lines.len(), 5, "{lines:?}");
+    let has_cjk = |s: &str| s.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+    assert!(!has_cjk(lines[0]) && has_cjk(lines[2]) && !has_cjk(lines[4]), "{lines:?}");
+    assert_eq!(lines[3], "----");
 
     println!("[3] cancel: a second request cancels the first");
     let long = "Large language models have changed how software is built. ".repeat(20);

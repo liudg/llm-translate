@@ -138,12 +138,13 @@ llm-translate/
    - 内存：总量/可用；< 8 GB 提示仅建议 2B。
    - 显卡：DXGI 枚举适配器（厂商 ID、专用显存）；Vulkan 可用性由 llama-server `--list-devices` 实测确认。
    - 磁盘：目标目录剩余空间 ≥ 模型体积 × 1.2。
-2. **默认选择规则**（需求方已确认，2026-11-20；阈值按"模型体积 + 4K 上下文的显存余量"估算，M1 实测显存见 10.6；按实测 9B 与 7B 显存占用几乎相同，阈值是否调整待需求方确认）
-   - 核显（DXGI 专用显存 < 1 GB）共享系统内存，不计入"可用显存"，走 CPU 路径；多显卡时选可用显存最大的独显并用 `--device VulkanN` 指定，避免 llama.cpp 把层拆到核显上（M1 实现，待需求方确认）。
-   - Vulkan 可用显存 ≥ 7 GB → Index-Translate-9B，全部 offload（`-ngl 99`）。
-   - Vulkan 可用显存 ≥ 5.5 GB → Hy-MT2-7B，全部 offload。
-   - Vulkan 可用显存 ≥ 2 GB → Index-Translate-2B，全部 offload。
-   - 否则 → Index-Translate-2B，CPU，线程数 = 物理核数。
+2. **默认选择规则**（按 M1 实测显存校准，见 10.6；需求方授权按使用体验决定，2026-11-20）
+   - 独显可用显存 ≥ 5.5 GB → Index-Translate-9B，全部 offload（`-ngl 99`）。实测 9B 含 4K 上下文占 5.1 GB，6 GB 显卡即可。
+   - 独显可用显存 ≥ 2 GB → Index-Translate-2B，全部 offload（实测占 1.5 GB）。
+   - 否则 → Index-Translate-2B，CPU，线程数 = 物理核数。9B 在 CPU 上仅约 5 tok/s，不作为默认。
+   - Hy-MT2-7B 不作为默认：显存占用与 9B 相同而 9B 质量更好；保留在"自定义"中可选。
+   - 核显（DXGI 专用显存 < 1 GB）共享系统内存且 Vulkan 驱动质量参差，不计入"可用显存"，默认走 CPU；可在"自定义"中手动选择核显。多显卡时选可用显存最大的独显并用 `--device VulkanN` 指定，避免 llama.cpp 把层拆到核显上。
+   - 内存 < 8 GB 时只推荐 2B。
    - 用户可在 Customize 中改选（不强制展示，"一键"路径只需点"开始部署"）。
 3. **Download**
    - 各源用 Range 请求前 2 MB 测速，选最快源；失败自动切下一源。
@@ -166,7 +167,7 @@ llm-translate/
 
 ### 5.3 翻译调度（translate）
 
-- **方向判定**：统计 CJK 统一表意字符与拉丁字母数量，CJK ≥ 拉丁 → 中译英，否则英译中；输入框可手动锁定方向。
+- **方向判定**：自动模式下**逐段**判定（中英混排的文本各段各自翻译）：统计 CJK 统一表意字符与拉丁字母数量，CJK ≥ 拉丁 → 中译英，否则英译中；不含任何字母的段落（数字、符号、分隔线）原样保留、不送模型。手动锁定方向时所有段落按锁定方向翻译。
 - **分段**：按段落切分，单段超过约 1500 token 再按句切；逐段流式输出，保留原段落结构。
 - **调度**：单队列；新的划词/截图请求取消正在进行的旧请求；输入框输入防抖 500 ms。
 - **缓存**：(原文, 方向, 模型) → 译文，LRU 500 条，仅内存。
@@ -339,7 +340,7 @@ llm-translate/
 | Hy-MT2-7B Q4_K_M | Vulkan GPU | 5.4 s | — | ~42 tok/s（M0） | 5.1 GB |
 
 - Index-Translate 用 `chat_template_kwargs.enable_thinking=false` 时无 `reasoning_content`、无 `<think>`；不传该参数也不思考（模板默认插入空思考块），仍按 3.3 传参。
-- 9B 显存占用与 Hy-MT2-7B 几乎相同（约 5.1 GB），6 GB 显卡也能全量 offload 9B。
+- 9B 显存占用与 Hy-MT2-7B 几乎相同（约 5.1 GB），6 GB 显卡也能全量 offload 9B；据此 5.1 节默认规则改为 ≥ 5.5 GB → 9B，7B 不再自动选择。
 - llama-server 运行只需 `llama-server.exe`、`llama-server-impl.dll`、`llama-common.dll`、`llama.dll`、`mtmd.dll`、`ggml*.dll`、`libomp.dll`，共 89 MB；由 `scripts/fetch-llama.ps1` 拉取到 `src-tauri/resources/llama/`（不入 git）。
 - 端到端检查 `src-tauri/examples/m1_check.rs`：下载（无可用源、暂停/续传/换源、已存在只校验、SHA256 不一致重下）与推理（GPU 启动失败→CPU 降级、新请求取消旧请求、杀进程自动重启、闲置释放后重新加载）全部通过。
 

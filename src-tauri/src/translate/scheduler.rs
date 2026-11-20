@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::cache::Cache;
 use super::clean::Cleaner;
-use super::detect::{Direction, detect};
+use super::detect::{Direction, detect, detect_paragraph};
 use super::prompt;
 use super::segment::{Piece, segment};
 use crate::deploy::manifest::Manifest;
@@ -106,11 +106,26 @@ impl Translator {
             _ = token.cancelled() => return Err(ChatError::Cancelled),
         };
         let t0 = Instant::now();
-        let direction = req.direction.unwrap_or_else(|| detect(&req.text));
-        sink(TranslateEvent::Start { direction });
+        // Overall direction is only the label; in auto mode each paragraph is
+        // detected on its own so mixed Chinese/English text works.
+        let overall = req.direction.unwrap_or_else(|| detect(&req.text));
+        sink(TranslateEvent::Start { direction: overall });
 
+        // Paragraph direction; None = no letters, copied through unchanged.
+        let para_dir = |chunks: &[String]| {
+            let text = chunks.concat();
+            detect_paragraph(&text).map(|d| req.direction.unwrap_or(d))
+        };
         let pieces = segment(&req.text);
-        if !pieces.iter().any(|p| matches!(p, Piece::Text(_))) {
+        let needs_model = pieces.iter().any(|p| matches!(p, Piece::Text(c) if para_dir(c).is_some()));
+        if !needs_model {
+            for p in pieces {
+                let text = match p {
+                    Piece::Keep(s) => s,
+                    Piece::Text(c) => c.join(" "),
+                };
+                sink(TranslateEvent::Delta { text });
+            }
             return Ok(TranslateEvent::Done { elapsed_ms: 0 });
         }
 
@@ -122,7 +137,6 @@ impl Translator {
             .clone();
 
         let mut port = None;
-        let joiner = if direction.target_is_zh() { "" } else { " " };
         for piece in pieces {
             let chunks = match piece {
                 Piece::Keep(s) => {
@@ -131,6 +145,11 @@ impl Translator {
                 }
                 Piece::Text(chunks) => chunks,
             };
+            let Some(direction) = para_dir(&chunks) else {
+                sink(TranslateEvent::Delta { text: chunks.join(" ") });
+                continue;
+            };
+            let joiner = if direction.target_is_zh() { "" } else { " " };
             for (i, chunk) in chunks.iter().enumerate() {
                 if i > 0 {
                     sink(TranslateEvent::Delta { text: joiner.into() });

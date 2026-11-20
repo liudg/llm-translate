@@ -196,10 +196,11 @@ pub fn recommend(hw: &HardwareInfo) -> Recommendation {
     let vram_gb = best.map(|g| g.free_mb as f64 / 1024.0).unwrap_or(0.0);
     let ram_gb = hw.ram_total_mb as f64 / 1024.0;
 
-    let (mut model, backend) = if vram_gb >= 7.0 {
+    // Measured with a 4K context (DESIGN 10.6): 9B needs 5.1 GB, 2B 1.5 GB.
+    // Hy-MT2-7B needs as much VRAM as 9B but 9B is the stronger model, so 7B
+    // is never the default (still selectable in Customize).
+    let (mut model, backend) = if vram_gb >= 5.5 {
         (MODEL_9B, Backend::Vulkan)
-    } else if vram_gb >= 5.5 {
-        (MODEL_7B, Backend::Vulkan)
     } else if vram_gb >= 2.0 {
         (MODEL_2B, Backend::Vulkan)
     } else {
@@ -305,7 +306,12 @@ mod tests {
         let r = recommend(&hw(vec![gpu("Vulkan0", 7189, false)], 16));
         assert_eq!((r.model_id.as_str(), r.backend), (MODEL_9B, Backend::Vulkan));
         assert_eq!(r.device.as_deref(), Some("Vulkan0"));
-        assert_eq!(recommend(&hw(vec![gpu("Vulkan0", 6000, false)], 16)).model_id, MODEL_7B);
+        // A 6 GB card (~5.6 GB free) runs 9B; 7B is never picked automatically.
+        assert_eq!(recommend(&hw(vec![gpu("Vulkan0", 5700, false)], 16)).model_id, MODEL_9B);
+        assert_eq!(recommend(&hw(vec![gpu("Vulkan0", 5500, false)], 16)).model_id, MODEL_2B);
+        for free in [1000, 2500, 5000, 5700, 7000, 12000] {
+            assert_ne!(recommend(&hw(vec![gpu("Vulkan0", free, false)], 16)).model_id, MODEL_7B);
+        }
         let r = recommend(&hw(vec![gpu("Vulkan0", 3000, false)], 16));
         assert_eq!((r.model_id.as_str(), r.backend), (MODEL_2B, Backend::Vulkan));
         let r = recommend(&hw(vec![gpu("Vulkan0", 1500, false)], 16));
