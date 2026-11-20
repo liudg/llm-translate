@@ -1,0 +1,11 @@
+[it9b-cpu16] load=4.73s vram_delta=-143MB args=--device none -ngl 0 -t 16
+  short-zh2en  ttft=   580ms total=  2577ms tokens=  11    5.0 tok/s thinking_leak=False
+    -> 'Does this feature work properly in the terminal as well?'
+  short-en2zh  ttft=   573ms total=  2809ms tokens=   9    3.6 tok/s thinking_leak=False
+    -> '这个功能在终端中也能正常工作吗？'
+  slang-zh2en  ttft=   589ms total=  2729ms tokens=  12    5.1 tok/s thinking_leak=False
+    -> 'That move was absolutely brilliant—it totally left me speechless.'
+  para-en2zh   ttft=   835ms total= 10597ms tokens=  54    5.4 tok/s thinking_leak=False
+    -> '大型语言模型已经改变了软件开发的方式。如今，开发者无需编写明确的规则，而是用自然语言描述期望的行为，由模型自行推断具体细节。这种转变给测试、延迟和成本带来了新的挑战，尤其是在模型需要在内存有限的消费级硬件上本地运行时。'
+  para-zh2en   ttft=   959ms total= 14313ms tokens=  71    5.2 tok/s thinking_leak=False
+    -> 'Locally deployed translation models do not rely on the internet, ensuring stable response times and preventing user data from being uploaded to the cloud. However, they do have certain hardware requirements, necessitating a trade-off between model size, translation quality, and inference speed. For everyday tasks like translating selected text or screenshots, a quantified small model is typically sufficient.'

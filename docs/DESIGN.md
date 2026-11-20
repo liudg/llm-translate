@@ -45,68 +45,30 @@
 
 - 三个模型都提供官方 GGUF。Index-Translate 的 GGUF 同时带图片翻译用的 `mmproj` 文件，本应用**不下载**（截图翻译需要文字位置做原位覆盖，仍走 OCR）。
 - Hy-MT2-7B：M0 已在官方 llama.cpp b12541 上实测可用（GPU 约 42 tok/s）。
-- Index-Translate-2B / 9B：【待验证，M1 第一项】在 llama.cpp b12541 上能否加载（Qwen3.5 架构）、关闭思考模式是否生效、CPU / GPU 速度。若不可用，需回到需求方重新确认模型库。
+- Index-Translate-2B / 9B：M1 已在 llama.cpp b12541 上实测可用，思考模式不输出（见 10.6）。
 - 不再纳入：HY-MT1.5 全系、Hy-MT2-1.8B、Hy-MT2-30B-A3B，以及 1.25bit / 2bit 极限量化版本。
 
 ### 3.2 模型清单 `models.json`（随应用发布，可扩展）
 
+实际清单见 `src-tauri/resources/models.json`（M1 已填入精确大小与 SHA256）。每个条目字段：
+
 ```json
 {
-  "version": 1,
-  "models": [
-    {
-      "id": "index-translate-2b-q4",
-      "name": "轻量 · Index-Translate 2B",
-      "file": "Index-Translate-2B.Q4_K_M.gguf",
-      "size": 1310000000,
-      "sha256": "<M1 下载后计算填入>",
-      "sources": [
-        { "name": "modelscope", "url": "https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/<file>" },
-        { "name": "huggingface","url": "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/<file>" },
-        { "name": "hf-mirror",  "url": "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/<file>" }
-      ],
-      "minRamGB": 4,
-      "recommendVramGB": 2,
-      "ctx": 4096,
-      "promptProfile": "index-translate"
-    },
-    {
-      "id": "hy-mt2-7b-q4",
-      "name": "均衡 · Hy-MT2 7B",
-      "file": "Hy-MT2-7B-Q4_K_M.gguf",
-      "size": 4624648896,
-      "sha256": "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
-      "sources": [
-        { "name": "modelscope", "url": "https://www.modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-7B-GGUF/resolve/master/<file>" },
-        { "name": "huggingface","url": "https://huggingface.co/tencent/Hy-MT2-7B-GGUF/resolve/main/<file>" },
-        { "name": "hf-mirror",  "url": "https://hf-mirror.com/tencent/Hy-MT2-7B-GGUF/resolve/main/<file>" }
-      ],
-      "minRamGB": 8,
-      "recommendVramGB": 6,
-      "ctx": 4096,
-      "promptProfile": "hy-mt"
-    },
-    {
-      "id": "index-translate-9b-q4",
-      "name": "高质量 · Index-Translate 9B",
-      "file": "Index-Translate-9B.Q4_K_M.gguf",
-      "size": 5780000000,
-      "sha256": "<M1 下载后计算填入>",
-      "sources": [
-        { "name": "modelscope", "url": "https://www.modelscope.cn/models/IndexTeam/Index-Translate-9B-GGUF/resolve/master/<file>" },
-        { "name": "huggingface","url": "https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF/resolve/main/<file>" },
-        { "name": "hf-mirror",  "url": "https://hf-mirror.com/IndexTeam/Index-Translate-9B-GGUF/resolve/main/<file>" }
-      ],
-      "minRamGB": 12,
-      "recommendVramGB": 8,
-      "ctx": 4096,
-      "promptProfile": "index-translate"
-    }
-  ]
+  "id": "index-translate-2b-q4",
+  "name": "轻量 · Index-Translate 2B",
+  "file": "Index-Translate-2B.Q4_K_M.gguf",
+  "size": 1312164352,
+  "sha256": "044b313d29342bd3b2c77cbb64023ca0d209bd9b3247763f9d162767ef2d746a",
+  "sources": [
+    { "name": "modelscope",  "url": "https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/<file>" },
+    { "name": "huggingface", "url": "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/<file>" },
+    { "name": "hf-mirror",   "url": "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/<file>" }
+  ],
+  "minRamGB": 4, "recommendVramGB": 2, "ctx": 4096, "promptProfile": "index-translate"
 }
 ```
 
-- `size` 为近似值的条目、ModelScope 的下载路径格式，在 M1 下载实测时核实并填入精确值与 SHA256。
+- M1 核实：三个模型在 ModelScope 都有官方 GGUF 仓库（`IndexTeam/*-GGUF`、`Tencent-Hunyuan/Hy-MT2-7B-GGUF`），`resolve/master/<file>` 302 跳转到 CDN，支持 Range；ModelScope 的 HEAD 请求不返回长度，测速/续传一律用 Range GET。
 
 ### 3.3 提示词与采样（按模型的 promptProfile）
 
@@ -176,7 +138,8 @@ llm-translate/
    - 内存：总量/可用；< 8 GB 提示仅建议 2B。
    - 显卡：DXGI 枚举适配器（厂商 ID、专用显存）；Vulkan 可用性由 llama-server `--list-devices` 实测确认。
    - 磁盘：目标目录剩余空间 ≥ 模型体积 × 1.2。
-2. **默认选择规则**（需求方已确认，2026-11-20；阈值按"模型体积 + 4K 上下文的显存余量"估算，M1 实测显存占用后校准）
+2. **默认选择规则**（需求方已确认，2026-11-20；阈值按"模型体积 + 4K 上下文的显存余量"估算，M1 实测显存见 10.6；按实测 9B 与 7B 显存占用几乎相同，阈值是否调整待需求方确认）
+   - 核显（DXGI 专用显存 < 1 GB）共享系统内存，不计入"可用显存"，走 CPU 路径；多显卡时选可用显存最大的独显并用 `--device VulkanN` 指定，避免 llama.cpp 把层拆到核显上（M1 实现，待需求方确认）。
    - Vulkan 可用显存 ≥ 7 GB → Index-Translate-9B，全部 offload（`-ngl 99`）。
    - Vulkan 可用显存 ≥ 5.5 GB → Hy-MT2-7B，全部 offload。
    - Vulkan 可用显存 ≥ 2 GB → Index-Translate-2B，全部 offload。
@@ -185,7 +148,8 @@ llm-translate/
 3. **Download**
    - 各源用 Range 请求前 2 MB 测速，选最快源；失败自动切下一源。
    - 写入 `.part`，支持暂停/续传；完成后 SHA256 校验，失败删除重下。
-   - 走系统代理（读取 WinINet 注册表代理设置）。
+   - 只用直连，不做任何代理处理（需求方确认，2026-11-20）。
+   - 每源最多重试 3 次（有进展的断开不计次），全部源失败后再测速重来，共 3 轮；SHA256 不一致自动重下 1 次。
 4. **Launch / SelfTest**
    - 启动 llama-server，健康检查 `/health`；翻译"你好，世界"并校验返回非空。
    - GPU 后端启动失败或自检失败 → 自动以 CPU 后端重试，并记入设置。
@@ -277,7 +241,7 @@ llm-translate/
 |---|---|
 | 启动到托盘就绪（不含模型加载） | < 1 s |
 | 2B 模型加载（SSD） | < 3 s |
-| 划词点击 → 首字（2B，短句，CPU） | < 500 ms（M1 实测 Index-Translate-2B 后校准） |
+| 划词点击 → 首字（2B，短句，CPU） | < 500 ms；M1 实测 2B CPU 首字约 150 ms，短句总耗时 600–700 ms |
 | 截图框选完成 → OCR 完成（常规区域） | < 300 ms |
 | 应用自身内存（不含模型） | < 120 MB |
 
@@ -286,13 +250,13 @@ llm-translate/
 | 风险 | 应对 |
 |---|---|
 | 老旧 Intel 核显 Vulkan 驱动异常 | 自检失败自动降级 CPU |
-| Index-Translate（Qwen3.5 架构）在 llama.cpp b12541 上无法加载或思考模式关不掉 | M1 第一项验证；必要时升级 llama.cpp 版本；仍不行则回到需求方重新确认模型库 |
+| Index-Translate（Qwen3.5 架构）在 llama.cpp b12541 上无法加载或思考模式关不掉 | M1 已验证可用（10.6），风险关闭 |
 | 小众术语误译（M0 测过的模型都把"划词翻译"译错） | 可选：Index-Translate 官方支持术语表约束，可做内置/用户自定义术语表（未纳入当前范围，需需求方确认） |
-| HuggingFace 下载频繁断连（M0 实测 5 次断开） | 下载器必须支持自动重试 + Range 续传；走系统代理 |
+| HuggingFace 下载频繁断连（M0 实测 5 次断开） | 下载器自动重试 + Range 续传 + 换源（M1 已实现并测试） |
 | Chromium 首次 UIA 查询需激活无障碍树，可能取不到 | Ctrl+Insert 兜底 |
 | 部分应用不支持 Ctrl+Insert | 提示改用截图翻译；黑名单 |
 | 鼠标钩子/模拟按键被杀软误报 | 个人自用，必要时加白；日志记录 |
-| ModelScope 是否有官方 GGUF 仓库 | M1 核实，无则用 HuggingFace / hf-mirror |
+| ModelScope 是否有官方 GGUF 仓库 | M1 已核实：有，且国内直连最快 |
 | Win10 Acrylic 拖动卡顿 | 检测系统版本降级为纯色背景 |
 
 ## 9. 里程碑
@@ -361,3 +325,21 @@ llm-translate/
 
 - Tauri 2.12 + React 19 + Tailwind 4 骨架可运行；Win11 Mica 效果正常。
 - 遗留至 M6：Win10 Acrylic 效果、VC++ DLL 应用本地部署在干净 Win10 上的验证。
+
+### 10.6 M1 模型实测（2026-11-20，llama.cpp b12541 Vulkan 版，`spikes/bench/bench_profile.py`）
+
+三个模型 SHA256 均与官方一致；国内直连 ModelScope 下载 22–41 MB/s，hf-mirror 直连可用，huggingface.co 直连不通。
+
+| 模型 | 后端 | 加载 | 短句首字 / 总耗时 | 生成速度 | 显存增量（含 4K 上下文） |
+|---|---|---|---|---|---|
+| Index-Translate-2B Q4_K_M | Vulkan GPU | 4.6 s | 90–240 ms / 190–360 ms | 87–117 tok/s | 1.5 GB |
+| Index-Translate-2B Q4_K_M | CPU 8 线程 | 1.9 s | ~150 ms / 610–720 ms | ~19 tok/s | — |
+| Index-Translate-9B Q4_K_M | Vulkan GPU | 6.6 s | 165–230 ms / 430–490 ms | 31–39 tok/s | 5.1 GB |
+| Index-Translate-9B Q4_K_M | CPU 16 线程 | 4.7 s | ~580 ms / 2.6–2.8 s | ~5 tok/s | — |
+| Hy-MT2-7B Q4_K_M | Vulkan GPU | 5.4 s | — | ~42 tok/s（M0） | 5.1 GB |
+
+- Index-Translate 用 `chat_template_kwargs.enable_thinking=false` 时无 `reasoning_content`、无 `<think>`；不传该参数也不思考（模板默认插入空思考块），仍按 3.3 传参。
+- 9B 显存占用与 Hy-MT2-7B 几乎相同（约 5.1 GB），6 GB 显卡也能全量 offload 9B。
+- llama-server 运行只需 `llama-server.exe`、`llama-server-impl.dll`、`llama-common.dll`、`llama.dll`、`mtmd.dll`、`ggml*.dll`、`libomp.dll`，共 89 MB；由 `scripts/fetch-llama.ps1` 拉取到 `src-tauri/resources/llama/`（不入 git）。
+- 端到端检查 `src-tauri/examples/m1_check.rs`：下载（无可用源、暂停/续传/换源、已存在只校验、SHA256 不一致重下）与推理（GPU 启动失败→CPU 降级、新请求取消旧请求、杀进程自动重启、闲置释放后重新加载）全部通过。
+

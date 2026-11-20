@@ -19,7 +19,19 @@
         "minWidth": 640,
         "minHeight": 420,
         "transparent": true,
-        "center": true
+        "center": true,
+        "visible": false
+      },
+      {
+        "label": "wizard",
+        "title": "LLM Translate · 一键部署",
+        "width": 760,
+        "height": 580,
+        "minWidth": 680,
+        "minHeight": 520,
+        "transparent": true,
+        "center": true,
+        "visible": false
       }
     ],
     "security": {
@@ -35,6 +47,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/llama/*": "llama/",
+      "resources/models.json": "models.json"
+    }
   }
 }

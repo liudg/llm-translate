@@ -3,6 +3,19 @@
 :root {
   color-scheme: light dark;
   font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --accent: #005fb8;
+  --accent-hover: #0a6cc4;
+  --accent-text: #005fb8;
+  color: #1a1a1a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #60cdff;
+    --accent-hover: #4cc2ff;
+    --accent-text: #60cdff;
+    color: #f3f3f3;
+  }
 }
 
 html,
@@ -12,4 +25,23 @@ body,
   margin: 0;
   /* transparent so Mica / Acrylic shows through */
   background: transparent;
+  user-select: none;
+}
+
+textarea,
+.selectable {
+  user-select: text;
+}
+
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.progress-indeterminate {
+  animation: indeterminate 1.4s ease-in-out infinite;
 }

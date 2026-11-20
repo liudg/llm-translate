@@ -31,3 +31,6 @@ src-tauri/target/
 # Python
 __pycache__/
 *.pyc
+
+# llama.cpp binaries (fetched by scripts/fetch-llama.ps1)
+src-tauri/resources/llama/
