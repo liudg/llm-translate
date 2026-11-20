@@ -90,6 +90,19 @@ fn set_raw(f: u32, data: &[u8]) {
     }
 }
 
+/// Replace the clipboard with raw HGLOBAL formats (e.g. a screenshot as
+/// CF_DIB). `owner` must be a window whose thread pumps messages.
+pub fn set_contents(owner: Option<HWND>, items: &[(u32, Vec<u8>)]) -> bool {
+    let Some(_open) = Open::new(owner) else { return false };
+    unsafe {
+        let _ = EmptyClipboard();
+    }
+    for (f, data) in items {
+        set_raw(*f, data);
+    }
+    true
+}
+
 /// Put the saved contents back, marked so Win+V history does not record the
 /// restore as a new entry.
 fn restore(owner: Option<HWND>, saved: &Saved) {

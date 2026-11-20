@@ -6,7 +6,8 @@
     "main",
     "wizard",
     "mini",
-    "popup"
+    "popup",
+    "shot"
   ],
   "permissions": [
     "core:default",

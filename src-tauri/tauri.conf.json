@@ -62,6 +62,20 @@
         "visible": false,
         "shadow": true,
         "create": false
+      },
+      {
+        "label": "shot",
+        "title": "LLM Translate · 截图翻译",
+        "width": 400,
+        "height": 200,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": false,
+        "create": false
       }
     ],
     "security": {
@@ -80,6 +94,7 @@
     ],
     "resources": {
       "resources/llama/*": "llama/",
+      "resources/ocr/*": "ocr/",
       "resources/models.json": "models.json"
     }
   }

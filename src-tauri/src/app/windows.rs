@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow, Webvie
 use super::settings::Theme;
 
 /// Every window label in tauri.conf.json.
-const LABELS: [&str; 4] = ["main", "wizard", "mini", "popup"];
+const LABELS: [&str; 5] = ["main", "wizard", "mini", "popup", "shot"];
 
 /// Win11 (build >= 22000) -> Mica, Win10 -> Acrylic.
 pub fn pick_effect(build: u32) -> (Effect, &'static str) {
@@ -19,9 +19,15 @@ pub fn pick_effect(build: u32) -> (Effect, &'static str) {
 pub fn create_all(app: &AppHandle, build: u32) -> tauri::Result<()> {
     let (effect, _) = pick_effect(build);
     for cfg in &app.config().app.windows {
-        WebviewWindowBuilder::from_config(app, cfg)?
-            .effects(EffectsBuilder::new().effect(effect).build())
-            .build()?;
+        let builder = WebviewWindowBuilder::from_config(app, cfg)?;
+        // The screenshot result window must show the image exactly, with
+        // see-through margins: no backdrop.
+        let builder = if cfg.label == crate::capture::LABEL {
+            builder
+        } else {
+            builder.effects(EffectsBuilder::new().effect(effect).build())
+        };
+        builder.build()?;
     }
     Ok(())
 }

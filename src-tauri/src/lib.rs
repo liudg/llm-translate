@@ -1,4 +1,5 @@
 pub mod app;
+pub mod capture;
 pub mod deploy;
 pub mod inference;
 pub mod selection;
@@ -16,11 +17,12 @@ use app::hotkey::Hotkeys;
 use app::popup::{self, PopupState};
 use app::settings::{Backend, Settings, SettingsStore};
 use app::{paths, windows};
+use capture::CaptureState;
 use deploy::manifest::Manifest;
 use inference::supervisor::{Notice, Status, Supervisor};
 use selection::Selection;
 use state::AppState;
-use translate::scheduler::{TranslateEvent, TranslateRequest, Translator};
+use translate::scheduler::{BatchEvent, BatchRequest, TranslateEvent, TranslateRequest, Translator};
 
 pub use app::windows::show_main;
 
@@ -39,6 +41,17 @@ async fn translate(state: State<'_, AppState>, req: TranslateRequest, on_event: 
     let translator = state.translator.clone();
     translator
         .translate(req, move |ev| {
+            let _ = on_event.send(ev);
+        })
+        .await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn translate_batch(state: State<'_, AppState>, req: BatchRequest, on_event: Channel<BatchEvent>) -> Result<(), ()> {
+    let translator = state.translator.clone();
+    translator
+        .translate_batch(req, move |ev| {
             let _ = on_event.send(ev);
         })
         .await;
@@ -142,6 +155,7 @@ pub fn run() {
                 .map_err(|e| tracing::error!("selection translation unavailable: {e}"))
                 .ok();
             spawn_forwarders(app.handle(), &state, selection);
+            app.manage(CaptureState::new(app.path().resource_dir()?.join("ocr")));
             app.manage(state);
             app::hotkey::register_defaults(app.handle());
 
@@ -200,6 +214,10 @@ pub fn run() {
                         api.prevent_close();
                         popup::hide(app);
                     }
+                    capture::LABEL => {
+                        api.prevent_close();
+                        capture::hide(app);
+                    }
                     // Re-deploy opened from the main window: just go back to it.
                     "wizard" if app.state::<AppState>().settings.get().deployed => {
                         api.prevent_close();
@@ -215,6 +233,7 @@ pub fn run() {
             get_settings,
             inference_status,
             translate,
+            translate_batch,
             translate_cancel,
             app::commands::app_info,
             app::commands::set_theme,
@@ -231,6 +250,13 @@ pub fn run() {
             app::popup::popup_close,
             app::popup::popup_current,
             app::hotkey::hotkey_status,
+            capture::shot_start,
+            capture::shot_current,
+            capture::shot_image,
+            capture::shot_ocr,
+            capture::shot_shown,
+            capture::shot_close,
+            capture::shot_copy_image,
             deploy::wizard::deploy_detect,
             deploy::wizard::deploy_models,
             deploy::wizard::disk_free_bytes,

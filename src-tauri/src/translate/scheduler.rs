@@ -12,7 +12,7 @@ use super::clean::Cleaner;
 use super::detect::{Direction, detect, detect_paragraph};
 use super::prompt;
 use super::segment::{Piece, segment};
-use crate::deploy::manifest::Manifest;
+use crate::deploy::manifest::{Manifest, ModelEntry};
 use crate::inference::client::{ChatError, local_client, stream_chat};
 use crate::inference::supervisor::Supervisor;
 
@@ -31,6 +31,27 @@ pub enum TranslateEvent {
     /// then only the majority.
     Start { direction: Direction, mixed: bool },
     Delta { text: String },
+    #[serde(rename_all = "camelCase")]
+    Done { elapsed_ms: u64 },
+    Error { message: String },
+    Cancelled,
+}
+
+/// Several independent texts (screenshot paragraphs) translated as one
+/// request: one cancellation, results tagged with the item index.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchRequest {
+    pub items: Vec<String>,
+    pub direction: Option<Direction>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum BatchEvent {
+    Start,
+    Delta { index: usize, text: String },
+    ItemDone { index: usize },
     #[serde(rename_all = "camelCase")]
     Done { elapsed_ms: u64 },
     Error { message: String },
@@ -63,18 +84,33 @@ impl Translator {
         self.current.lock().unwrap().cancel();
     }
 
+    /// Cancel the running request and hand out the token for a new one.
+    fn begin(&self) -> CancellationToken {
+        let mut cur = self.current.lock().unwrap();
+        cur.cancel();
+        *cur = CancellationToken::new();
+        cur.clone()
+    }
+
     /// Translate, streaming events to `sink`. Cancels any earlier request.
     pub async fn translate(&self, req: TranslateRequest, sink: impl Fn(TranslateEvent) + Send + Sync) {
-        let token = {
-            let mut cur = self.current.lock().unwrap();
-            cur.cancel();
-            *cur = CancellationToken::new();
-            cur.clone()
-        };
+        let token = self.begin();
         let event = match self.run(&req, &token, &sink).await {
             Ok(ev) => ev,
             Err(ChatError::Cancelled) => TranslateEvent::Cancelled,
             Err(ChatError::Failed(m)) => TranslateEvent::Error { message: m },
+        };
+        sink(event);
+    }
+
+    /// Translate several texts in order. Cancels any earlier request; a later
+    /// request cancels this whole batch.
+    pub async fn translate_batch(&self, req: BatchRequest, sink: impl Fn(BatchEvent) + Send + Sync) {
+        let token = self.begin();
+        let event = match self.run_batch(&req, &token, &sink).await {
+            Ok(ev) => ev,
+            Err(ChatError::Cancelled) => BatchEvent::Cancelled,
+            Err(ChatError::Failed(m)) => BatchEvent::Error { message: m },
         };
         sink(event);
     }
@@ -138,43 +174,106 @@ impl Translator {
             return Ok(TranslateEvent::Done { elapsed_ms: 0 });
         }
 
-        let spec = self.sup.spec().await.ok_or_else(|| ChatError::Failed("尚未部署模型".into()))?;
-        let model = self
-            .manifest
-            .get(&spec.model_id)
-            .ok_or_else(|| ChatError::Failed(format!("未知模型 {}", spec.model_id)))?
-            .clone();
-
+        let model = self.model().await?;
         let mut port = None;
+        self.stream_pieces(&model, &mut port, token, pieces, para_dir, &|text| sink(TranslateEvent::Delta { text }))
+            .await?;
+        Ok(TranslateEvent::Done { elapsed_ms: t0.elapsed().as_millis() as u64 })
+    }
+
+    async fn run_batch(
+        &self,
+        req: &BatchRequest,
+        token: &CancellationToken,
+        sink: &(impl Fn(BatchEvent) + Send + Sync),
+    ) -> Result<BatchEvent, ChatError> {
+        let _guard = tokio::select! {
+            g = self.serial.lock() => g,
+            _ = token.cancelled() => return Err(ChatError::Cancelled),
+        };
+        let t0 = Instant::now();
+        sink(BatchEvent::Start);
+        let mut model = None;
+        let mut port = None;
+        for (index, text) in req.items.iter().enumerate() {
+            let para_dir = |chunks: &[String]| detect_paragraph(&chunks.concat()).map(|d| req.direction.unwrap_or(d));
+            let pieces = segment(text);
+            let needs_model = pieces.iter().any(|p| matches!(p, Piece::Text(c) if para_dir(c).is_some()));
+            if needs_model && model.is_none() {
+                model = Some(self.model().await?);
+            }
+            match &model {
+                Some(m) => {
+                    self.stream_pieces(m, &mut port, token, pieces, para_dir, &|text| {
+                        sink(BatchEvent::Delta { index, text })
+                    })
+                    .await?
+                }
+                None => {
+                    for p in pieces {
+                        let text = match p {
+                            Piece::Keep(s) => s,
+                            Piece::Text(c) => c.join(" "),
+                        };
+                        sink(BatchEvent::Delta { index, text });
+                    }
+                }
+            }
+            sink(BatchEvent::ItemDone { index });
+        }
+        Ok(BatchEvent::Done { elapsed_ms: t0.elapsed().as_millis() as u64 })
+    }
+
+    /// The model entry of the configured launch spec.
+    async fn model(&self) -> Result<ModelEntry, ChatError> {
+        let spec = self.sup.spec().await.ok_or_else(|| ChatError::Failed("尚未部署模型".into()))?;
+        self.manifest
+            .get(&spec.model_id)
+            .cloned()
+            .ok_or_else(|| ChatError::Failed(format!("未知模型 {}", spec.model_id)))
+    }
+
+    /// Translate segmented pieces in order, streaming cleaned text to `emit`.
+    /// `para_dir` gives a paragraph's direction (`None`: copy it unchanged);
+    /// `port` starts the model on first use and is reused across calls.
+    async fn stream_pieces(
+        &self,
+        model: &ModelEntry,
+        port: &mut Option<u16>,
+        token: &CancellationToken,
+        pieces: Vec<Piece>,
+        para_dir: impl Fn(&[String]) -> Option<Direction>,
+        emit: &(impl Fn(String) + Send + Sync),
+    ) -> Result<(), ChatError> {
         for piece in pieces {
             let chunks = match piece {
                 Piece::Keep(s) => {
-                    sink(TranslateEvent::Delta { text: s });
+                    emit(s);
                     continue;
                 }
                 Piece::Text(chunks) => chunks,
             };
             let Some(direction) = para_dir(&chunks) else {
-                sink(TranslateEvent::Delta { text: chunks.join(" ") });
+                emit(chunks.join(" "));
                 continue;
             };
             let joiner = if direction.target_is_zh() { "" } else { " " };
             for (i, chunk) in chunks.iter().enumerate() {
                 if i > 0 {
-                    sink(TranslateEvent::Delta { text: joiner.into() });
+                    emit(joiner.into());
                 }
                 if let Some(hit) = self.cache.get(chunk, direction, &model.id) {
-                    sink(TranslateEvent::Delta { text: hit });
+                    emit(hit);
                     continue;
                 }
-                let p = match port {
+                let p = match *port {
                     Some(p) => p,
                     None => {
                         let p = tokio::select! {
                             r = self.sup.ensure_ready() => r.map_err(ChatError::Failed)?,
                             _ = token.cancelled() => return Err(ChatError::Cancelled),
                         };
-                        port = Some(p);
+                        *port = Some(p);
                         p
                     }
                 };
@@ -186,14 +285,14 @@ impl Translator {
                     let out = cleaner.push(d);
                     if !out.is_empty() {
                         shown.push_str(&out);
-                        sink(TranslateEvent::Delta { text: out });
+                        emit(out);
                     }
                 })
                 .await?;
                 let rest = cleaner.finish();
                 if !rest.is_empty() {
                     shown.push_str(&rest);
-                    sink(TranslateEvent::Delta { text: rest });
+                    emit(rest);
                 }
                 self.sup.touch();
                 if !shown.trim().is_empty() {
@@ -201,6 +300,6 @@ impl Translator {
                 }
             }
         }
-        Ok(TranslateEvent::Done { elapsed_ms: t0.elapsed().as_millis() as u64 })
+        Ok(())
     }
 }

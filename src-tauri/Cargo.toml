@@ -59,6 +59,9 @@ windows = { version = "0.62.2", features = [
 reqwest = { version = "0.13.5", default-features = false, features = ["stream", "json", "http2", "native-tls"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
+# PP-OCRv6 via ONNX Runtime (statically linked prebuilt; imports DirectML.dll).
+oar-ocr = "0.11"
+image = { version = "0.25", default-features = false }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -1,0 +1,4 @@
+[env]
+# ort-sys extracts the prebuilt ONNX Runtime here; the default under
+# %LOCALAPPDATA% fails when the build runs on another drive (cross-drive rename).
+ORT_CACHE_DIR = { value = "target/ort-cache", relative = true }

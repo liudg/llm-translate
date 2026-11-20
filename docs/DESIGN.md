@@ -1,6 +1,6 @@
 # LLM Translate 详细设计 v1
 
-> 状态：方案已与需求方确认（2026-11-20）；M0 技术验证已完成，结果见第 10 节；M1、M2、M3 已完成。
+> 状态：方案已与需求方确认（2026-11-20）；M0 技术验证已完成，结果见第 10 节；M1、M2、M3、M4 已完成。
 
 ## 1. 需求范围
 
@@ -90,13 +90,13 @@
 │ inference llama-server 守护（启动/健康检查/重启/降级）· 流式客户端 · 取消  │
 │ translate 语言判定 · 分段 · 提示词 · LRU 缓存 · 请求调度（新请求顶替旧请求）│
 │ selection 鼠标钩子线程 · UIA 线程 · 安全复制 · 黑名单                      │
-│ capture   DXGI 截屏 · OCR · 段落合并 · 背景/文字色估计                     │
+│ capture   GDI 截屏 · 原生选区遮罩 · OCR · 段落合并 · 背景/文字色估计        │
 └───────────────┬──────────────────────────────┬──────────────────────┘
                 │ HTTP 127.0.0.1:随机端口(SSE)  │ Tauri IPC / events
         ┌───────▼────────┐            ┌────────▼─────────────────────────┐
         │ llama-server   │            │ WebView 窗口（预创建、隐藏待命）     │
         │ (cpu / vulkan) │            │ main · mini · popup（图标为原生窗口）│
-        └────────────────┘            │ shot-overlay · shot-result · wizard│
+        └────────────────┘            │ shot · wizard（截图遮罩为原生窗口）  │
                                       └──────────────────────────────────┘
 ```
 
@@ -112,11 +112,11 @@ llm-translate/
 │  │  ├─ inference/  supervisor.rs client.rs
 │  │  ├─ translate/  detect.rs segment.rs prompt.rs scheduler.rs cache.rs
 │  │  ├─ selection/  hook.rs icon.rs uia.rs clipboard.rs input.rs blacklist.rs
-│  │  └─ capture/    dxgi.rs overlay.rs ocr.rs layout.rs
+│  │  └─ capture/    screen.rs overlay.rs ocr.rs layout.rs
 │  ├─ resources/     llama/cpu/ llama/vulkan/ ocr/ models.json
 │  └─ tauri.conf.json
 ├─ src/              React 前端
-│  ├─ windows/       main mini popup shot-overlay shot-result wizard
+│  ├─ windows/       main mini popup shot wizard
 │  ├─ components/  stores/  styles/  lib/
 └─ docs/DESIGN.md
 ```
@@ -225,15 +225,21 @@ llm-translate/
 
 ### 5.6 截图翻译（capture）
 
-1. **截屏**：进程设为 Per-Monitor DPI Aware V2；DXGI Desktop Duplication 抓取所有显示器，冻结为位图。
-2. **选区**：每个显示器一个全屏遮罩窗显示冻结图，拖拽框选；Esc 取消，右键取消选区。
-3. **OCR**：det → rec（中英），得到文本行 + 四边形框；按行距/对齐合并为段落。
-4. **翻译**：逐段调用翻译调度，结果到达即渲染（渐进显示）。
-5. **渲染**（前端 Canvas）：
-   - 背景色：取段落框外扩 2 px 边缘像素的中位数，填充擦除原文。
-   - 文字色：取框内与背景对比最大的主色。
-   - 字号：从原行高估算，译文放不下时逐步缩小（下限 9 px）并允许换行。
-6. **结果窗**：无边框置顶窗口贴在原选区位置；工具条：切换原图/译图、复制全部译文、复制图片、关闭；可拖动。
+M4 实现（需求方确认，2026-11-20：结果窗只保留一个；只支持拖拽框选；工具条在原设计基础上加"复制原文"；多显示器不测）。
+
+1. **触发**：Alt+W（固定注册，见 5.7），或翻译页"截图"按钮（先最小化主窗口再截屏）。截屏前先隐藏上一次的结果窗；会话进行中再按 Alt+W 忽略。
+2. **截屏**：每个显示器一次 GDI `BitBlt(SRCCOPY | CAPTUREBLT)`，线程设为 Per-Monitor DPI Aware V2，坐标全部为物理像素。原计划的 DXGI Desktop Duplication 不再使用：一次性截屏 BitBlt 已足够快（2560×1600 实测 67 ms，debug 构建），且不需要 D3D 设备，旋转屏、接在另一块显卡上的屏幕（混合显卡笔记本上 DXGI 返回 UNSUPPORTED）也都能截。
+3. **选区**：每个显示器一个**原生 Win32** 全屏置顶窗口（不用 WebView，按下即显示、无需把位图传进 WebView、物理像素无换算误差）。选区外压暗，选区内原亮度，外侧描边，左上角显示"宽 × 高"，未拖动时顶部居中提示"拖动鼠标框选要翻译的区域　Esc 取消"。选区限于开始拖动的显示器。Esc 取消；右键在拖动中清除本次拖动，否则取消；切到其他应用（失去激活）也取消。松开鼠标后遮罩保持显示，直到结果窗画好并显示在它上面才关闭，避免闪出实时桌面（页面 3 秒内未回报则强制关闭）。
+4. **OCR**：PP-OCRv6 Small（det + rec + 字典，约 31 MB，`scripts/fetch-ocr.ps1` 拉到 `src-tauri/resources/ocr/`，随安装包）。按下 Alt+W 时即在后台加载引擎（与用户拖选重叠，实测加载 354 ms），闲置 1 分钟释放：引擎常驻时应用内存约 364 MB，释放后 93 MB（工作集，debug 构建；ONNX Runtime 的 CPU 内存池 oar-ocr 未提供关闭选项），而重新加载的耗时被拖选掩盖。检测参数用 PP-OCRv6 官方默认值。过滤置信度 < 0.8 且只有 1 个字符的结果（窗口按钮等图标）。
+5. **段落合并**：下一行紧接上一行（间距 < 0.7 行高）、行高相近（0.75–1.33 倍）、左边缘相近（< 1.5 行高）、水平方向有重叠，且上一行足够长（≥ 8 倍行高）并到达段落右边缘（像是自动换行）时才合并。菜单、列表、表格单元格等短行各自独立，保留各自位置。中文行直接相接，英文行加空格，行尾连字符断词自动接回。阅读顺序为从上到下、同一行从左到右。
+6. **颜色与可用空间**（Rust 端计算）：背景色取段落框外扩 2 px 一圈像素的逐通道中位数；文字色取框内与背景差异最大的前 10% 像素的中位数，差异过小时按背景亮度取近黑 / 近白。另外算出段落右侧、下方连续为背景色且不碰其他段落的空白范围（最多到原框的 2 倍），供译文变长时使用。
+7. **翻译**：翻译调度新增批量接口 `translate_batch`：一张截图的所有可翻译段落算一个请求（一次取消），逐段推送 `delta` / `itemDone`；新的划词、输入或截图请求照常顶替它。方向自动、逐段判定；不含字母的段落（数字、符号）不送模型，原图保持不变。
+8. **渲染**（结果窗 Canvas，按物理像素 1:1 绘制）：
+   - 用背景色填充段落框（外扩 2 px）擦除原文，用文字色绘制译文。
+   - 字号起点 = OCR 框高 × 0.9（实测原字号 / 框高为 0.73–1.16，多数约 0.95），行距 1.28 倍；放不下时逐步缩小，下限 9 DIP，允许换行（中文逐字断行，英文按词，避头标点）。
+   - 若在原框内需要缩到起点的 85% 以下（典型为中译英变长），改在原框加右侧 / 下方空白范围内重新排版，取字号更大者；扩展部分同样先擦除。
+   - 译文流式到达即重绘（每帧最多一次）。
+9. **结果窗**（WebView `shot`，无边框、置顶、透明、无阴影、不进任务栏，失焦不关闭）：图像位于原选区的物理位置，与原画面严丝合缝；图像外圈 1 px 半透明强调色描边。工具条（高 44 DIP，最小宽 360 DIP）默认在图像下方，下方放不下放上方，都放不下则盖在图像底部；选区比工具条窄且靠近屏幕右边缘时，窗口向左延伸，图像位置不变，多出的区域透明。工具条：状态（正在识别文字 / 正在加载模型 / 正在翻译 n/m / 已翻译 n 段 / 未识别到文字 / 没有需要翻译的文字 / 被中断 / 错误）、显示原图 / 译文切换、复制全部译文（Ctrl+C）、复制原文、复制图片（复制当前显示的一面，24 位 CF_DIB）、关闭（Esc）。拖动图像或工具条空白处可移动窗口。新截图替换旧结果。
 
 ### 5.7 托盘、自启、快捷键
 
@@ -241,6 +247,7 @@ llm-translate/
 - 开机自启：tauri-plugin-autostart（HKCU Run），启动参数 `--minimized` 仅驻托盘。
 - 快捷键默认：Alt+Q 输入翻译、Alt+W 截图翻译、划词开关（默认不绑定）。设置页录制快捷键，注册失败即提示"已被其他程序占用"。
 - M2 已用 tauri-plugin-global-shortcut 固定注册 Alt+Q（不可改）；注册失败时主窗口顶部横幅提示、设置页快捷键行标"未生效"，迷你窗仍可从翻译页按钮打开。录制与冲突检测在 M5。
+- M4 同样固定注册 Alt+W（截图翻译），占用时的提示方式与 Alt+Q 相同，截图仍可从翻译页"截图"按钮发起。
 - 单实例：重复启动时激活已有实例。
 
 ### 5.8 设置页
@@ -253,13 +260,16 @@ llm-translate/
   - 模型：当前模型、状态、目录；推理后端（CPU / 检测到的各 Vulkan 设备）与 CPU 线程数，"应用并重新加载模型"后在后台重启推理进程；闲置释放（从不 / 5 / 10 / 30 / 60 分钟，立即生效）；"更换模型 / 重新部署"打开向导。显卡列表用 `llama-server --list-devices` 检测，不停止正在运行的模型，首次打开设置页时才检测。
   - 关于：版本、系统 build 与窗口效果、设置文件位置、打开日志目录。
 - M3 可用：划词翻译总开关（默认开）、三种触发方式开关、黑名单。
-- 占位（标注"将在后续版本提供"）：开机自启、截图快捷键、划词开关快捷键、自定义快捷键（M5）；模型下载 / 切换 / 删除管理（M5）。
+- M4 可用：截图翻译快捷键一行显示 Alt+W 的真实状态（已生效 / 未生效）。
+- 占位（标注"将在后续版本提供"）：开机自启、划词开关快捷键、自定义快捷键（M5）；模型下载 / 切换 / 删除管理（M5）。
 - 每次设置变更都广播 `settings-changed` 事件，各窗口据此同步（含 GPU 失败自动退回 CPU 的变更）。
 
 ## 6. 安装包
 
 - NSIS，当前用户安装到 `%LOCALAPPDATA%\Programs\LLMTranslate`，免管理员。
-- 内容：主程序（含静态链接的 ONNX Runtime）、llama.cpp Vulkan 版所需文件（约 89 MB 未压缩）、OCR 模型（约 30 MB）、`models.json`；压缩后预计 < 100 MB。
+- 内容：主程序（含静态链接的 ONNX Runtime）、llama.cpp Vulkan 版所需文件（约 89 MB 未压缩）、OCR 模型（约 31 MB，`resources/ocr/`）、`models.json`；压缩后预计 < 100 MB。
+- M4 发现：ort 预编译的静态库带 DirectML，主程序因此**直接导入 `DirectML.dll`**，另外导入 `MSVCP140.dll`、`MSVCP140_1.dll`、`VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`。M6 需把 `DirectML.dll`（构建时 ort-sys 已复制到 target 目录）和这几个 VC++ DLL 放在主程序同目录（llama.cpp 那一份在 `llama/` 子目录，主程序用不到），并在干净 Win10 上验证。
+- 构建：`src-tauri/.cargo/config.toml` 把 `ORT_CACHE_DIR` 设为 `target/ort-cache`（默认位置在 C 盘，跨盘重命名会失败）。
 - WebView2：内嵌 bootstrapper（Win10 可能未预装）。
 - VC++ 运行库：llama.cpp 依赖 `MSVCP140.dll`、`VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`（UCRT `api-ms-win-crt-*` 为 Win10 系统自带）。采用**应用本地部署**：把这 3 个 DLL 放在 llama-server 同目录，无需安装 VC++ Redist。M6 在干净 Win10 上验证。
 - 卸载：询问是否同时删除已下载模型。
@@ -304,6 +314,11 @@ llm-translate/
 
 **划词测试矩阵**：Windows Terminal（cmd / PowerShell / WSL）、传统 conhost、Git Bash（mintty）、VS Code 集成终端、Xshell、MobaXterm、PuTTY、Chrome、Edge、Word、WPS、微信、记事本、资源管理器。
 
+- M4 验收（2026-11-20，Win11 build 26200，单屏 2560×1600 @150%，9B GPU）：需求方确认多显示器不测（无环境）。用 DPI 感知的 Tk 测试窗（中英标题、三行英文段落、菜单列表、中文行、深色块白字、版本号）+ SendInput 驱动真实应用：
+  - 位置：结果窗图像与截屏前的屏幕逐像素比对，译文区域以外 0 个像素不同（偏移 1 px 则有 240–2280 个不同）；"显示原图"与原屏幕 0 差异；"复制图片"与屏幕显示 0 差异。150% 的非整数缩放下 Canvas 为 1:1 绘制。
+  - 内容：三行英文合并为一段，菜单三项各自独立，深色块正确取色（白字），中译英变长时扩展到右侧空白并换行；10 行识别出 8 段译文，复制译文 / 复制原文按阅读顺序。
+  - 交互：Esc、右键取消遮罩；屏幕右下角的窄选区工具条在上方、窗口向左延伸且图像不动；再次 Alt+W 先隐藏旧结果；翻译页"截图"按钮先最小化主窗口再出遮罩；结果窗 Esc 关闭。
+  - 耗时（debug 构建）：截屏 67 ms；OCR 引擎加载 354 ms（与拖选重叠）；1180×600 识别 10 行 453 ms（同图 release 构建的 spike 为 211 ms）。
 - M3 验收范围（需求方确认，2026-11-20）：终端只用 Windows 自带终端验证，即 conhost 与 Windows Terminal（cmd / PowerShell）。其余终端与应用不在 M3 验收内。
 - M3 验收（2026-11-20，Win11 build 26200，`src-tauri/examples/m3_check.rs`）：
   - `capture` 模式：conhost、Windows Terminal（cmd）、Windows Terminal（PowerShell）中各自运行 `ping -t`。无选区时 Ctrl+Insert、拖选后 UIA 取词、拖选后仅用 Ctrl+Insert 取词，ping 均存活；Ctrl+Insert 后用户剪贴板原样恢复。对照组真实 Ctrl+C 会终止 ping，证明测试有效。

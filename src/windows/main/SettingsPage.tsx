@@ -389,6 +389,7 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
   }, [visible]);
 
   const mini = useMemo(() => hotkeys.find((h) => h.id === "mini"), [hotkeys]);
+  const shot = useMemo(() => hotkeys.find((h) => h.id === "shot"), [hotkeys]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -419,8 +420,11 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
             </kbd>
             {mini && (mini.registered ? <Badge tone="good">已生效</Badge> : <Badge tone="warn">未生效</Badge>)}
           </Row>
-          <Row title="截图翻译" desc={LATER} muted>
-            <kbd className="rounded border border-[var(--stroke)] px-2 py-0.5 text-xs opacity-60">Alt+W</kbd>
+          <Row title="截图翻译" desc={shot?.error ?? "框选屏幕区域，译文覆盖在原文位置"}>
+            <kbd className="rounded border border-[var(--stroke)] bg-[var(--surface)] px-2 py-0.5 text-xs">
+              {shot?.keys ?? "Alt+W"}
+            </kbd>
+            {shot && (shot.registered ? <Badge tone="good">已生效</Badge> : <Badge tone="warn">未生效</Badge>)}
           </Row>
           <Row title="划词翻译开关" desc={LATER} muted>
             <span className="text-xs opacity-60">未绑定</span>

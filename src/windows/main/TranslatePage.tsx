@@ -2,7 +2,7 @@
 // a 500 ms debounce (DESIGN 5.3), Ctrl+Enter to translate at once.
 import { useEffect, useRef, useState } from "react";
 import { useCopy } from "../../lib/useCopy";
-import { Check, Copy, PanelTop, RotateCw, Square, X } from "lucide-react";
+import { Check, Copy, PanelTop, RotateCw, ScanText, Square, X } from "lucide-react";
 import { api, type HotkeyInfo } from "../../lib/api";
 import { DIR_LABEL, DIR_SHORT, useTranslator, directionText, type DirChoice } from "../../lib/useTranslator";
 import { Button, IconButton, Segmented, Spinner } from "../../components/ui";
@@ -20,6 +20,7 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
   const status = useInference((s) => s.status);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const miniKeys = hotkeys.find((h) => h.id === "mini" && h.registered)?.keys;
+  const shotKeys = hotkeys.find((h) => h.id === "shot" && h.registered)?.keys;
 
   // Translate after typing pauses; skip when nothing changed since the last request.
   useEffect(() => {
@@ -70,6 +71,14 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
             title="打开迷你翻译窗"
           >
             迷你窗{miniKeys && <kbd className="ml-1 text-xs opacity-60">{miniKeys}</kbd>}
+          </Button>
+          <Button
+            variant="subtle"
+            icon={<ScanText className="size-4" />}
+            onClick={() => api.shotStart()}
+            title="截图翻译：框选屏幕区域，译文覆盖在原文位置"
+          >
+            截图{shotKeys && <kbd className="ml-1 text-xs opacity-60">{shotKeys}</kbd>}
           </Button>
         </div>
       </header>

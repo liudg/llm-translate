@@ -89,7 +89,8 @@ export default function Main() {
             )}
             {failedHotkeys.length > 0 && !hotkeyDismissed && (
               <Banner onClose={() => setHotkeyDismissed(true)}>
-                快捷键 {failedHotkeys.map((h) => h.keys).join("、")} 已被其他程序占用，迷你翻译窗只能从翻译页按钮打开。
+                快捷键 {failedHotkeys.map((h) => h.keys).join("、")} 已被其他程序占用，
+                {failedHotkeys.map((h) => (h.id === "mini" ? "迷你窗" : "截图翻译")).join("和")}只能从翻译页按钮打开。
               </Banner>
             )}
           </div>

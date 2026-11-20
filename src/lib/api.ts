@@ -48,7 +48,7 @@ export interface AppInfo {
 }
 
 export interface HotkeyInfo {
-  id: "mini";
+  id: "mini" | "shot";
   keys: string;
   registered: boolean;
   error: string | null;
@@ -144,6 +144,39 @@ export type TranslateEvent =
   | { type: "error"; message: string }
   | { type: "cancelled" };
 
+/** A new screenshot for the result window; sizes are physical pixels. */
+export interface ShotPayload {
+  id: number;
+  width: number;
+  height: number;
+  imageX: number;
+  imageY: number;
+  toolbar: "below" | "above" | "inside";
+  scale: number;
+}
+
+/** An OCR paragraph; geometry in image pixels, colours as [r, g, b]. */
+export interface ShotParagraph {
+  rect: [number, number, number, number];
+  lineHeight: number;
+  linePitch: number;
+  lines: number;
+  text: string;
+  translatable: boolean;
+  bg: [number, number, number];
+  fg: [number, number, number];
+  /** Width and height (from the rect origin) the translation may grow into. */
+  room: [number, number];
+}
+
+export type BatchEvent =
+  | { type: "start" }
+  | { type: "delta"; index: number; text: string }
+  | { type: "itemDone"; index: number }
+  | { type: "done"; elapsedMs: number }
+  | { type: "error"; message: string }
+  | { type: "cancelled" };
+
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   inferenceStatus: () => invoke<InferenceStatus>("inference_status"),
@@ -174,6 +207,20 @@ export const api = {
   popupClose: () => invoke<void>("popup_close"),
   popupCurrent: () => invoke<SelectionPayload | null>("popup_current"),
   cancelTranslate: () => invoke<void>("translate_cancel"),
+  translateBatch: (items: string[], direction: Direction | null, onEvent: (e: BatchEvent) => void) => {
+    const ch = new Channel<BatchEvent>();
+    ch.onmessage = onEvent;
+    return invoke<void>("translate_batch", { req: { items, direction }, onEvent: ch });
+  },
+  shotStart: () => invoke<void>("shot_start"),
+  shotCurrent: () => invoke<ShotPayload | null>("shot_current"),
+  /** Raw RGBA bytes of the screenshot. */
+  shotImage: (id: number) => invoke<ArrayBuffer>("shot_image", { id }),
+  shotOcr: (id: number) => invoke<ShotParagraph[]>("shot_ocr", { id }),
+  shotShown: (id: number) => invoke<void>("shot_shown", { id }),
+  shotClose: () => invoke<void>("shot_close"),
+  shotCopyImage: (rgba: Uint8Array, width: number, height: number) =>
+    invoke<void>("shot_copy_image", rgba, { headers: { "x-width": String(width), "x-height": String(height) } }),
   translate: (text: string, direction: Direction | null, onEvent: (e: TranslateEvent) => void) => {
     const ch = new Channel<TranslateEvent>();
     ch.onmessage = onEvent;
@@ -191,6 +238,8 @@ export const events = {
   selection: (cb: (p: SelectionPayload) => void) =>
     listen<SelectionPayload>("selection-captured", (e) => cb(e.payload)),
   popupHidden: (cb: () => void) => listen("popup-hidden", () => cb()),
+  shotNew: (cb: (p: ShotPayload) => void) => listen<ShotPayload>("shot-new", (e) => cb(e.payload)),
+  shotHidden: (cb: () => void) => listen("shot-hidden", () => cb()),
 };
 
 /** Tauri rejects with the serialized error value; normalize to text. */
