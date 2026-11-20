@@ -1,7 +1,7 @@
 // Main window (DESIGN 5.4 / 5.8): compact navigation rail + Translate / Settings pages.
 import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, Languages, Settings as SettingsIcon, X } from "lucide-react";
-import { api, type HotkeyInfo } from "../../lib/api";
+import { api, events, type HotkeyInfo } from "../../lib/api";
 import { startInferenceSync, useInference } from "../../stores/inference";
 import TranslatePage from "./TranslatePage";
 import SettingsPage from "./SettingsPage";
@@ -57,9 +57,19 @@ export default function Main() {
   useEffect(() => {
     startInferenceSync();
     api.hotkeys().then(setHotkeys);
+    const unHotkeys = events.hotkeys((h) => {
+      setHotkeys(h);
+      setHotkeyDismissed(false);
+    });
+    const unNav = events.navigate((p) => (p === "settings" || p === "translate") && setPage(p));
+    return () => {
+      unHotkeys.then((f) => f());
+      unNav.then((f) => f());
+    };
   }, []);
 
-  const failedHotkeys = hotkeys.filter((h) => !h.registered);
+  // Bound but not registered (taken by another program at startup).
+  const failedHotkeys = hotkeys.filter((h) => h.keys && !h.registered);
 
   return (
     <div className="flex h-full">
@@ -89,8 +99,11 @@ export default function Main() {
             )}
             {failedHotkeys.length > 0 && !hotkeyDismissed && (
               <Banner onClose={() => setHotkeyDismissed(true)}>
-                快捷键 {failedHotkeys.map((h) => h.keys).join("、")} 已被其他程序占用，
-                {failedHotkeys.map((h) => (h.id === "mini" ? "迷你窗" : "截图翻译")).join("和")}只能从翻译页按钮打开。
+                快捷键 {failedHotkeys.map((h) => h.keys).join("、")} 已被其他程序占用，可在
+                <button className="mx-0.5 underline" onClick={() => setPage("settings")}>
+                  设置
+                </button>
+                中更换；迷你窗和截图翻译也可以从翻译页按钮或托盘菜单打开。
               </Banner>
             )}
           </div>

@@ -76,6 +76,8 @@ export default function Wizard() {
   const [error, setError] = useState<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<LaunchOutcome | null>(null);
+  /** Deployed before this wizard run (re-deploy from settings). */
+  const [wasDeployed, setWasDeployed] = useState(true);
   const running = useRef(false);
 
   const runDetect = useCallback(async () => {
@@ -99,6 +101,7 @@ export default function Wizard() {
     setOutcome(null);
     setTransfer(null);
     setPaused(false);
+    api.getSettings().then((s) => setWasDeployed(s.deployed));
     runDetect();
   }, [runDetect]);
 
@@ -106,6 +109,7 @@ export default function Wizard() {
     // The window is pre-created hidden; when already deployed it only detects
     // once opened again (wizard-reset).
     api.getSettings().then((s) => {
+      setWasDeployed(s.deployed);
       if (!s.deployed) runDetect();
     });
     const un = listen("wizard-reset", reset);
@@ -294,7 +298,7 @@ export default function Wizard() {
             )}
           </Centered>
         ) : step === "done" && outcome ? (
-          <Done outcome={outcome} model={model} onFinish={() => api.finish()} />
+          <Done outcome={outcome} model={model} firstDeploy={!wasDeployed} onFinish={(autostart) => api.finish(autostart)} />
         ) : (
           <Centered title="请稍候" detail="">
             <Spinner />
@@ -605,7 +609,22 @@ function ErrorPanel({ message, onRetry, onCustomize }: { message: string; onRetr
   );
 }
 
-function Done({ outcome, model, onFinish }: { outcome: LaunchOutcome; model: ModelView | undefined; onFinish: () => void }) {
+function Done({
+  outcome,
+  model,
+  firstDeploy,
+  onFinish,
+}: {
+  outcome: LaunchOutcome;
+  model: ModelView | undefined;
+  firstDeploy: boolean;
+  onFinish: (autostart: boolean | null) => void;
+}) {
+  // First deployment: on by default. Re-deploy: show the current setting.
+  const [autostart, setAutostart] = useState<boolean | null>(firstDeploy ? true : null);
+  useEffect(() => {
+    if (!firstDeploy) api.autostart().then(setAutostart);
+  }, [firstDeploy]);
   return (
     <div className="mx-auto flex max-w-md flex-col items-center pt-10 text-center">
       <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-green-600/15 text-green-700 dark:text-green-400">
@@ -630,7 +649,17 @@ function Done({ outcome, model, onFinish }: { outcome: LaunchOutcome; model: Mod
           </span>
         </p>
       )}
-      <Button variant="primary" className="mt-6" onClick={onFinish}>
+      <label className="mt-5 flex cursor-pointer items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="size-4 accent-[var(--accent)]"
+          checked={autostart ?? false}
+          disabled={autostart === null}
+          onChange={(e) => setAutostart(e.target.checked)}
+        />
+        开机自动启动（驻留在系统托盘）
+      </label>
+      <Button variant="primary" className="mt-4" onClick={() => onFinish(autostart)}>
         开始使用
       </Button>
     </div>

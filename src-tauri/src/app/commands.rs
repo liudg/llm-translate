@@ -112,6 +112,24 @@ pub fn set_selection(state: State<'_, AppState>, selection: SelectionSettings) -
         .map_err(|e| format!("保存设置失败：{e}"))
 }
 
+/// Start with Windows (HKCU Run, `--minimized`). Read from the registry each
+/// time, so turning it off in Task Manager shows up here too.
+#[tauri::command]
+pub fn autostart_enabled() -> bool {
+    super::autostart::is_enabled()
+}
+
+#[tauri::command]
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    apply_autostart(enabled)
+}
+
+pub fn apply_autostart(enabled: bool) -> Result<(), String> {
+    let r = super::autostart::set(enabled);
+    tracing::info!("autostart {}: {r:?}", if enabled { "on" } else { "off" });
+    r.map_err(|e| format!("设置开机自启失败：{e}"))
+}
+
 /// Processes with a visible window, for the blacklist picker.
 #[tauri::command]
 pub async fn window_processes() -> Vec<WindowProcess> {

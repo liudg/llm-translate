@@ -122,6 +122,9 @@ fn spawn_forwarders(app: &AppHandle, state: &AppState, selection: Option<Arc<Sel
                 windows::apply_theme(&handle, theme);
             }
             if s.selection != sel {
+                if s.selection.enabled != sel.enabled {
+                    app::tray::sync_selection(&handle, s.selection.enabled);
+                }
                 sel = s.selection.clone();
                 if let Some(selection) = &selection {
                     selection.set_config(&sel);
@@ -133,12 +136,38 @@ fn spawn_forwarders(app: &AppHandle, state: &AppState, selection: Option<Arc<Sel
     });
 }
 
+/// The first time the main window is closed, tell the user the app keeps
+/// running in the tray.
+fn tray_hint_once(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    let state = app.state::<AppState>();
+    if state.settings.get().tray_hint_shown {
+        return;
+    }
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title("LLM Translate 仍在运行")
+        .body("已最小化到系统托盘，快捷键和划词翻译照常可用。可在托盘图标的菜单中退出。")
+        .show()
+    {
+        tracing::warn!("tray notification failed: {e}");
+    }
+    let _ = state.settings.update(|s| s.tray_hint_shown = true);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _log_guard = app::logging::init();
     tracing::info!("LLM Translate {} starting", env!("CARGO_PKG_VERSION"));
 
     tauri::Builder::default()
+        // Must come first: a second launch only activates this instance.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            tracing::info!("second instance started with {args:?}; activating");
+            app::tray::open_primary(app);
+        }))
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(app::hotkey::plugin())
@@ -157,7 +186,8 @@ pub fn run() {
             spawn_forwarders(app.handle(), &state, selection);
             app.manage(CaptureState::new(app.path().resource_dir()?.join("ocr")));
             app.manage(state);
-            app::hotkey::register_defaults(app.handle());
+            app::tray::create(app.handle())?;
+            app::hotkey::register_saved(app.handle());
 
             let build = windows_version::OsVersion::current().build;
             app.manage(AppInfo {
@@ -170,12 +200,17 @@ pub fn run() {
 
             // Windows last: their pages call commands that need the state above.
             windows::create_all(app.handle(), build)?;
+            windows::restore_main_placement(app.handle());
             windows::apply_theme(app.handle(), settings.theme);
 
+            // Started with Windows: stay in the tray.
+            let minimized = std::env::args().any(|a| a == app::autostart::ARG);
             match spec {
                 Some(spec) => {
-                    tracing::info!("deployed model {}; preloading", spec.model_id);
-                    show_main(app.handle());
+                    tracing::info!("deployed model {}; preloading{}", spec.model_id, if minimized { " (tray only)" } else { "" });
+                    if !minimized {
+                        show_main(app.handle());
+                    }
                     tauri::async_runtime::spawn(async move {
                         sup.configure(spec).await;
                         if let Err(e) = sup.ensure_ready().await {
@@ -195,6 +230,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) if window.label() == "main" => {
+                    windows::schedule_save_main_placement(app);
+                }
                 // The mini window behaves like a flyout: it hides on focus loss.
                 WindowEvent::Focused(false) if window.label() == "mini" => {
                     let _ = window.hide();
@@ -218,12 +256,19 @@ pub fn run() {
                         api.prevent_close();
                         capture::hide(app);
                     }
+                    // The main window hides to the tray; quit from the tray menu.
+                    "main" => {
+                        api.prevent_close();
+                        windows::save_main_placement(app);
+                        let _ = window.hide();
+                        tray_hint_once(app);
+                    }
                     // Re-deploy opened from the main window: just go back to it.
                     "wizard" if app.state::<AppState>().settings.get().deployed => {
                         api.prevent_close();
                         show_main(app);
                     }
-                    // No tray yet (M5): closing a top-level window quits.
+                    // Closing the wizard before the first deployment quits.
                     _ => app.exit(0),
                 },
                 _ => {}
@@ -250,6 +295,10 @@ pub fn run() {
             app::popup::popup_close,
             app::popup::popup_current,
             app::hotkey::hotkey_status,
+            app::hotkey::hotkey_pause,
+            app::hotkey::hotkey_set,
+            app::commands::autostart_enabled,
+            app::commands::set_autostart,
             capture::shot_start,
             capture::shot_current,
             capture::shot_image,
@@ -264,6 +313,8 @@ pub fn run() {
             deploy::wizard::download_control,
             deploy::wizard::deploy_launch,
             deploy::wizard::deploy_finish,
+            deploy::wizard::model_switch,
+            deploy::wizard::model_delete,
             deploy::wizard::open_wizard,
         ])
         .run(tauri::generate_context!())

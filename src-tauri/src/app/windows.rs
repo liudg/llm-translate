@@ -1,8 +1,19 @@
-//! Window helpers: theme, backdrop effects, showing the main and mini windows.
+//! Window helpers: theme, backdrop effects, showing the main and mini windows,
+//! remembering the main window's placement.
 
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 use tauri::window::{Effect, EffectsBuilder};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow, WebviewWindowBuilder};
+use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromRect};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindowPlacement, SW_HIDE, SW_SHOWMAXIMIZED, SetWindowPlacement, WINDOWPLACEMENT, WPF_RESTORETOMAXIMIZED,
+};
 
+use super::paths;
 use super::settings::Theme;
 
 /// Every window label in tauri.conf.json.
@@ -54,7 +65,96 @@ pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
+        if RESTORE_MAXIMIZED.swap(false, Ordering::Relaxed) {
+            let _ = w.maximize();
+        }
         let _ = w.set_focus();
+    }
+}
+
+/// Main window placement in `%APPDATA%\LLMTranslate\window.json`: the normal
+/// (restored) rectangle in workspace coordinates, as `GetWindowPlacement`
+/// reports it, and whether it was maximized. Kept out of settings.json so
+/// moving the window does not broadcast `settings-changed`.
+#[derive(Debug, Serialize, Deserialize)]
+struct Placement {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    maximized: bool,
+}
+
+/// Maximize on the first `show_main` after restoring a maximized placement
+/// (the window is still hidden when the placement is applied).
+static RESTORE_MAXIMIZED: AtomicBool = AtomicBool::new(false);
+static SAVE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn placement_file() -> std::path::PathBuf {
+    paths::config_dir().join("window.json")
+}
+
+fn main_hwnd(app: &AppHandle) -> Option<(WebviewWindow, HWND)> {
+    let w = app.get_webview_window("main")?;
+    let h = w.hwnd().ok()?;
+    Some((w, HWND(h.0 as *mut _)))
+}
+
+/// Save the main window's placement if it is visible (a hidden window's
+/// placement is whatever was saved when it was hidden).
+pub fn save_main_placement(app: &AppHandle) {
+    let Some((w, hwnd)) = main_hwnd(app) else { return };
+    if !w.is_visible().unwrap_or(false) {
+        return;
+    }
+    let mut wp = WINDOWPLACEMENT { length: size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
+    if unsafe { GetWindowPlacement(hwnd, &mut wp) }.is_err() {
+        return;
+    }
+    let r = wp.rcNormalPosition;
+    let maximized = wp.showCmd == SW_SHOWMAXIMIZED.0 as u32 || (wp.flags.0 & WPF_RESTORETOMAXIMIZED.0) != 0;
+    let p = Placement { left: r.left, top: r.top, right: r.right, bottom: r.bottom, maximized };
+    let path = placement_file();
+    let _ = std::fs::create_dir_all(paths::config_dir());
+    if let Err(e) = serde_json::to_vec(&p).map_err(anyhow::Error::from).and_then(|d| Ok(std::fs::write(&path, d)?)) {
+        tracing::warn!("saving window placement failed: {e}");
+    }
+}
+
+/// Save the placement shortly after the last move / resize.
+pub fn schedule_save_main_placement(app: &AppHandle) {
+    let generation = SAVE_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        if SAVE_GENERATION.load(Ordering::Relaxed) == generation {
+            save_main_placement(&app);
+        }
+    });
+}
+
+/// Apply the saved placement to the (still hidden) main window. Skipped when
+/// the rectangle is not on any current monitor; the window then stays centred.
+pub fn restore_main_placement(app: &AppHandle) {
+    let Ok(data) = std::fs::read(placement_file()) else { return };
+    let Ok(p) = serde_json::from_slice::<Placement>(&data) else { return };
+    let Some((_, hwnd)) = main_hwnd(app) else { return };
+    let rect = RECT { left: p.left, top: p.top, right: p.right, bottom: p.bottom };
+    if rect.right - rect.left < 200 || rect.bottom - rect.top < 150 {
+        return;
+    }
+    if unsafe { MonitorFromRect(&rect, MONITOR_DEFAULTTONULL) }.is_invalid() {
+        tracing::info!("saved window placement is off-screen; centring");
+        return;
+    }
+    let wp = WINDOWPLACEMENT {
+        length: size_of::<WINDOWPLACEMENT>() as u32,
+        showCmd: SW_HIDE.0 as u32,
+        rcNormalPosition: rect,
+        ..Default::default()
+    };
+    if unsafe { SetWindowPlacement(hwnd, &wp) }.is_ok() {
+        RESTORE_MAXIMIZED.store(p.maximized, Ordering::Relaxed);
     }
 }
 

@@ -1,7 +1,7 @@
 //! Deployment wizard commands (DESIGN 5.1). The step state machine lives in the
 //! wizard window; these commands do the work of each step.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -151,7 +151,25 @@ pub async fn deploy_launch(
     threads: u32,
 ) -> Result<LaunchOutcome, String> {
     let model = state.manifest.get(&model_id).cloned().ok_or(format!("未知模型 {model_id}"))?;
-    if !model.is_installed(&dir) {
+    let result = launch_and_test(&app, &state, &model, &dir, backend, device, threads).await;
+    if result.is_err() {
+        state.sup.stop().await;
+    }
+    result
+}
+
+/// Start `model` and run the self-test, falling back from GPU to CPU. Settings
+/// are saved only on success.
+async fn launch_and_test(
+    app: &AppHandle,
+    state: &AppState,
+    model: &ModelEntry,
+    dir: &Path,
+    backend: Backend,
+    device: Option<String>,
+    threads: u32,
+) -> Result<LaunchOutcome, String> {
+    if !model.is_installed(dir) {
         return Err("模型文件不存在或不完整，请重新下载".into());
     }
     let emit = |phase: &'static str, backend: Backend, message: Option<String>| {
@@ -162,7 +180,7 @@ pub async fn deploy_launch(
     let mut attempt = (backend, device);
     loop {
         let (b, d) = attempt.clone();
-        let spec = state.spec_for(&model, &dir, b, d.clone(), threads);
+        let spec = state.spec_for(model, dir, b, d.clone(), threads);
         state.sup.configure(spec).await;
         emit("starting", b, None);
         let t0 = Instant::now();
@@ -186,7 +204,7 @@ pub async fn deploy_launch(
                     .update(|s| {
                         s.deployed = true;
                         s.model_id = Some(model.id.clone());
-                        s.models_dir = dir.clone();
+                        s.models_dir = dir.to_path_buf();
                         s.backend = b;
                         s.device = d.clone();
                         s.threads = threads.max(1);
@@ -210,7 +228,6 @@ pub async fn deploy_launch(
                 attempt = (Backend::Cpu, None);
             }
             Err(e) => {
-                state.sup.stop().await;
                 return Err(match fallback_reason {
                     Some(g) => format!("GPU 启动失败（{g}），CPU 也失败：{e}"),
                     None => e,
@@ -220,9 +237,62 @@ pub async fn deploy_launch(
     }
 }
 
-/// Leave the wizard: show the main window.
+/// Model management (DESIGN 5.8): switch to another downloaded model with the
+/// saved backend. Runs the same launch + self-test as the wizard; if even the
+/// CPU attempt fails, the previous model is loaded again.
 #[tauri::command]
-pub fn deploy_finish(app: AppHandle) {
+pub async fn model_switch(app: AppHandle, state: State<'_, AppState>, model_id: String) -> Result<LaunchOutcome, String> {
+    let model = state.manifest.get(&model_id).cloned().ok_or(format!("未知模型 {model_id}"))?;
+    let s = state.settings.get();
+    let previous = state.spec_from_settings(&s);
+    tracing::info!("switching model {:?} -> {}", s.model_id, model.id);
+    let result = launch_and_test(&app, &state, &model, &s.models_dir, s.backend, s.device.clone(), s.threads).await;
+    let Err(e) = result else { return result };
+    tracing::warn!("switching to {} failed: {e}", model.id);
+    let Some(prev) = previous else {
+        state.sup.stop().await;
+        return Err(e);
+    };
+    let sup = state.sup.clone();
+    sup.configure(prev).await;
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = sup.ensure_ready().await {
+            tracing::error!("restoring the previous model failed: {e}");
+        }
+    });
+    Err(format!("{e}\n已恢复为原来的模型。"))
+}
+
+/// Delete a downloaded (or partly downloaded) model file. The model in use and
+/// a model being downloaded cannot be deleted.
+#[tauri::command]
+pub fn model_delete(state: State<'_, AppState>, model_id: String) -> Result<(), String> {
+    let model = state.manifest.get(&model_id).ok_or(format!("未知模型 {model_id}"))?;
+    let s = state.settings.get();
+    if s.deployed && s.model_id.as_deref() == Some(model_id.as_str()) {
+        return Err("正在使用的模型不能删除，请先切换到其他模型".into());
+    }
+    if state.downloads.lock().unwrap().contains_key(&model_id) {
+        return Err("该模型正在下载，请先取消下载".into());
+    }
+    let path = model.path_in(&s.models_dir);
+    for p in [downloader::part_path(&path), path] {
+        match std::fs::remove_file(&p) {
+            Ok(()) => tracing::info!("deleted {}", p.display()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("删除 {} 失败：{e}", p.display())),
+        }
+    }
+    Ok(())
+}
+
+/// Leave the wizard: apply the "start with Windows" choice and show the main
+/// window.
+#[tauri::command]
+pub fn deploy_finish(app: AppHandle, autostart: Option<bool>) {
+    if let Some(on) = autostart {
+        let _ = crate::app::commands::apply_autostart(on);
+    }
     crate::show_main(&app);
 }
 

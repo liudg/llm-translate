@@ -1,7 +1,7 @@
-// Settings (DESIGN 5.8). Live: theme, selection translation (M3), model
-// backend / threads / idle release, about. Startup, shortcut recording and
-// model management are placeholders until M5.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+// Settings (DESIGN 5.8): general (theme, start with Windows), shortcuts
+// (recorded), selection translation, models (management, backend / threads /
+// idle release), about.
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, FolderOpen, Plus, RefreshCw, X } from "lucide-react";
 import {
   api,
@@ -9,17 +9,15 @@ import {
   type AppInfo,
   type HardwareInfo,
   type HotkeyInfo,
-  type ModelView,
   type SelectionSettings,
   type Theme,
   type WindowProcess,
 } from "../../lib/api";
 import { mbToGb } from "../../lib/format";
-import { Badge, Button, Segmented, Select, Spinner, Toggle } from "../../components/ui";
-import { StatusChip } from "../../components/status";
+import { Button, Segmented, Select, Spinner, Toggle } from "../../components/ui";
 import { useSettings } from "../../stores/settings";
-
-const LATER = "将在后续版本提供";
+import { HotkeyRecorder } from "./HotkeyRecorder";
+import { ModelList } from "./ModelList";
 const IDLE_CHOICES = [0, 5, 10, 30, 60];
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
@@ -63,7 +61,8 @@ function backendKey(backend: "cpu" | "vulkan", device: string | null): BackendKe
 function ModelGroup() {
   const settings = useSettings((s) => s.settings);
   const [hw, setHw] = useState<HardwareInfo | null>(null);
-  const [models, setModels] = useState<ModelView[]>([]);
+  const [switching, setSwitching] = useState(false);
+  const onBusy = useCallback((b: boolean) => setSwitching(b), []);
   const [key, setKey] = useState<BackendKey | null>(null);
   const [threads, setThreads] = useState<number | null>(null);
   const [applying, setApplying] = useState(false);
@@ -72,16 +71,12 @@ function ModelGroup() {
   useEffect(() => {
     api.hardware().then(setHw).catch((e) => setError(errorText(e)));
   }, []);
-  useEffect(() => {
-    if (settings) api.models(settings.modelsDir).then(setModels);
-  }, [settings?.modelsDir, settings?.modelId]);
 
   if (!settings) return null;
   const savedKey = backendKey(settings.backend, settings.device);
   const curKey = key ?? savedKey;
   const curThreads = threads ?? settings.threads;
   const dirty = curKey !== savedKey || (curKey === "cpu" && curThreads !== settings.threads);
-  const model = models.find((m) => m.id === settings.modelId);
   const maxThreads = hw?.cpu.logicalCores ?? Math.max(settings.threads, 16);
 
   const apply = async () => {
@@ -101,22 +96,21 @@ function ModelGroup() {
 
   return (
     <Group title="模型">
+      <ModelList onBusy={onBusy} />
+
       <Row
-        title={model?.name ?? settings.modelId ?? "未部署"}
+        title="模型目录"
         desc={
-          <span className="flex flex-col gap-1">
-            <StatusChip />
-            <span className="selectable truncate" title={settings.modelsDir}>
-              {settings.modelsDir}
-            </span>
+          <span className="selectable block truncate" title={settings.modelsDir}>
+            {settings.modelsDir}
           </span>
         }
       >
         <Button icon={<FolderOpen className="size-4" />} onClick={() => api.openModelsDir()}>
           打开目录
         </Button>
-        <Button icon={<RefreshCw className="size-4" />} onClick={() => api.openWizard()}>
-          更换模型 / 重新部署
+        <Button icon={<RefreshCw className="size-4" />} disabled={switching} onClick={() => api.openWizard()}>
+          重新部署
         </Button>
       </Row>
 
@@ -177,7 +171,7 @@ function ModelGroup() {
               >
                 取消
               </Button>
-              <Button variant="primary" disabled={applying} onClick={apply}>
+              <Button variant="primary" disabled={applying || switching} onClick={apply}>
                 {applying ? <Spinner /> : null}
                 应用并重新加载模型
               </Button>
@@ -195,8 +189,6 @@ function ModelGroup() {
           ))}
         </Select>
       </Row>
-
-      <Row title="模型管理" desc={`下载、切换、删除多个模型${LATER}；目前可通过"更换模型 / 重新部署"更换`} muted />
     </Group>
   );
 }
@@ -388,8 +380,23 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
     if (visible) setMounted(true);
   }, [visible]);
 
-  const mini = useMemo(() => hotkeys.find((h) => h.id === "mini"), [hotkeys]);
-  const shot = useMemo(() => hotkeys.find((h) => h.id === "shot"), [hotkeys]);
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [autostartError, setAutostartError] = useState<string | null>(null);
+  // Re-read on every visit: it can also be turned off in Task Manager.
+  useEffect(() => {
+    if (visible) api.autostart().then(setAutostart);
+  }, [visible]);
+  const toggleAutostart = async (on: boolean) => {
+    setAutostartError(null);
+    try {
+      await api.setAutostart(on);
+    } catch (e) {
+      setAutostartError(errorText(e));
+    }
+    setAutostart(await api.autostart());
+  };
+
+  const hk = (id: HotkeyInfo["id"]) => hotkeys.find((h) => h.id === id);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -408,28 +415,24 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
               ]}
             />
           </Row>
-          <Row title="开机自启" desc={LATER} muted>
-            <Toggle checked={false} disabled />
+          <Row
+            title="开机自启"
+            desc={autostartError ?? "登录 Windows 后自动启动并驻留在系统托盘，不打开主窗口"}
+          >
+            <Toggle checked={autostart ?? false} disabled={autostart === null} onChange={toggleAutostart} />
           </Row>
         </Group>
 
         <Group title="快捷键">
-          <Row title="输入翻译（迷你窗）" desc={mini?.error ?? "在任意位置按下即可呼出迷你翻译窗"}>
-            <kbd className="rounded border border-[var(--stroke)] bg-[var(--surface)] px-2 py-0.5 text-xs">
-              {mini?.keys ?? "Alt+Q"}
-            </kbd>
-            {mini && (mini.registered ? <Badge tone="good">已生效</Badge> : <Badge tone="warn">未生效</Badge>)}
+          <Row title="输入翻译（迷你窗）" desc={hk("mini")?.error ?? "在任意位置按下即可呼出迷你翻译窗"}>
+            <HotkeyRecorder id="mini" info={hk("mini")} />
           </Row>
-          <Row title="截图翻译" desc={shot?.error ?? "框选屏幕区域，译文覆盖在原文位置"}>
-            <kbd className="rounded border border-[var(--stroke)] bg-[var(--surface)] px-2 py-0.5 text-xs">
-              {shot?.keys ?? "Alt+W"}
-            </kbd>
-            {shot && (shot.registered ? <Badge tone="good">已生效</Badge> : <Badge tone="warn">未生效</Badge>)}
+          <Row title="截图翻译" desc={hk("shot")?.error ?? "框选屏幕区域，译文覆盖在原文位置"}>
+            <HotkeyRecorder id="shot" info={hk("shot")} />
           </Row>
-          <Row title="划词翻译开关" desc={LATER} muted>
-            <span className="text-xs opacity-60">未绑定</span>
+          <Row title="划词翻译开关" desc={hk("selection")?.error ?? "打开 / 关闭划词翻译；关闭时托盘图标变灰"}>
+            <HotkeyRecorder id="selection" info={hk("selection")} />
           </Row>
-          <Row title="自定义快捷键" desc={`录制快捷键与冲突检测${LATER}`} muted />
         </Group>
 
         <SelectionGroup />

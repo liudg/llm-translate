@@ -16,6 +16,15 @@ export interface Settings {
   idleReleaseMinutes: number;
   theme: Theme;
   selection: SelectionSettings;
+  hotkeys: HotkeySettings;
+  trayHintShown: boolean;
+}
+
+/** Display strings such as `Ctrl+Alt+Q`; null when unbound. */
+export interface HotkeySettings {
+  mini: string | null;
+  shot: string | null;
+  selection: string | null;
 }
 
 export interface SelectionSettings {
@@ -47,9 +56,12 @@ export interface AppInfo {
   logsDir: string;
 }
 
+export type HotkeyId = "mini" | "shot" | "selection";
+
 export interface HotkeyInfo {
-  id: "mini" | "shot";
-  keys: string;
+  id: HotkeyId;
+  /** Null when unbound. */
+  keys: string | null;
   registered: boolean;
   error: string | null;
 }
@@ -188,7 +200,13 @@ export const api = {
     invoke<void>("download_control", { modelId, action }),
   launch: (args: { modelId: string; dir: string; backend: Backend; device: string | null; threads: number }) =>
     invoke<LaunchOutcome>("deploy_launch", args),
-  finish: () => invoke<void>("deploy_finish"),
+  finish: (autostart: boolean | null) => invoke<void>("deploy_finish", { autostart }),
+  modelSwitch: (modelId: string) => invoke<LaunchOutcome>("model_switch", { modelId }),
+  modelDelete: (modelId: string) => invoke<void>("model_delete", { modelId }),
+  autostart: () => invoke<boolean>("autostart_enabled"),
+  setAutostart: (enabled: boolean) => invoke<void>("set_autostart", { enabled }),
+  hotkeyPause: (paused: boolean) => invoke<void>("hotkey_pause", { paused }),
+  hotkeySet: (id: HotkeyId, keys: string | null) => invoke<void>("hotkey_set", { id, keys }),
   openWizard: () => invoke<void>("open_wizard"),
   openLogsDir: () => invoke<void>("open_logs_dir"),
   openModelsDir: () => invoke<void>("open_models_dir"),
@@ -240,6 +258,9 @@ export const events = {
   popupHidden: (cb: () => void) => listen("popup-hidden", () => cb()),
   shotNew: (cb: (p: ShotPayload) => void) => listen<ShotPayload>("shot-new", (e) => cb(e.payload)),
   shotHidden: (cb: () => void) => listen("shot-hidden", () => cb()),
+  hotkeys: (cb: (h: HotkeyInfo[]) => void) => listen<HotkeyInfo[]>("hotkeys-changed", (e) => cb(e.payload)),
+  /** Tray "settings": the main window switches page. */
+  navigate: (cb: (page: string) => void) => listen<string>("navigate", (e) => cb(e.payload)),
 };
 
 /** Tauri rejects with the serialized error value; normalize to text. */

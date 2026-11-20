@@ -114,8 +114,30 @@ fn free_port() -> std::io::Result<u16> {
     Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }
 
+/// Remove ANSI colour sequences (`ESC [ ... letter`) that llama-server writes
+/// even to a file; the text ends up in UI error messages.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '' {
+            if chars.clone().next() == Some('[') {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn log_tail(path: &PathBuf) -> String {
-    let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    let text = std::fs::read(path).map(|b| strip_ansi(&String::from_utf8_lossy(&b))).unwrap_or_default();
     let lines: Vec<&str> = text
         .lines()
         .filter(|l| {
@@ -398,5 +420,16 @@ impl Supervisor {
         tracing::info!("releasing model after {minutes} idle minutes");
         Self::stop_locked(&mut st).await;
         self.status.send_replace(Status::Idle);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn strips_ansi() {
+        assert_eq!(
+            super::strip_ansi("[34m0.00.356[0m [31mE failed to load[0m"),
+            "0.00.356 E failed to load"
+        );
     }
 }

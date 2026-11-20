@@ -40,6 +40,25 @@ pub struct Settings {
     pub idle_release_minutes: u32,
     pub theme: Theme,
     pub selection: SelectionSettings,
+    pub hotkeys: HotkeySettings,
+    /// The "still running in the tray" notification was shown once.
+    pub tray_hint_shown: bool,
+}
+
+/// Global shortcuts as display strings such as `Ctrl+Alt+Q` (DESIGN 5.7);
+/// `None` means unbound.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HotkeySettings {
+    pub mini: Option<String>,
+    pub shot: Option<String>,
+    pub selection: Option<String>,
+}
+
+impl Default for HotkeySettings {
+    fn default() -> Self {
+        Self { mini: Some("Alt+Q".into()), shot: Some("Alt+W".into()), selection: None }
+    }
 }
 
 /// Selection translation (DESIGN 5.5).
@@ -75,6 +94,8 @@ impl Default for Settings {
             idle_release_minutes: 0,
             theme: Theme::System,
             selection: SelectionSettings::default(),
+            hotkeys: HotkeySettings::default(),
+            tray_hint_shown: false,
         }
     }
 }
