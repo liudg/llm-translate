@@ -1,0 +1,19 @@
+load: 3150 ms (Tiny)
+
+== D:\Code\llm-translate\spikes\ocr\testdata\synthetic.png  1200x520  predict: 73 ms
+  [1.00] 本地翻译模型：隐私安全，离线可用   bbox=BoundingBox { points: [Point { x: 25.0, y: 26.0 }, Point { x: 616.0, y: 26.0 }, Point { x: 616.0, y: 61.0 }, Point { x: 25.0, y: 61.0 }] }
+  [0.98] Large language models run locally on consumer hardware.   bbox=BoundingBox { points: [Point { x: 24.0, y: 89.0 }, Point { x: 774.0, y: 89.0 }, Point { x: 774.0, y: 119.0 }, Point { x: 24.0, y: 119.0 }] }
+  [0.99] 截图翻译会把译文覆盖在原文位置，并保持原有的排版结构。   bbox=BoundingBox { points: [Point { x: 24.0, y: 133.0 }, Point { x: 581.0, y: 133.0 }, Point { x: 581.0, y: 154.0 }, Point { x: 24.0, y: 154.0 }] }
+  [0.98] cargo build --release# build time: 1m 10s   bbox=BoundingBox { points: [Point { x: 23.0, y: 168.0 }, Point { x: 555.0, y: 168.0 }, Point { x: 555.0, y: 189.0 }, Point { x: 23.0, y: 189.0 }] }
+  [0.98] Small text: The quick brown fox jumps over the lazy doq. 0123456789   bbox=BoundingBox { points: [Point { x: 21.0, y: 204.0 }, Point { x: 551.0, y: 204.0 }, Point { x: 551.0, y: 221.0 }, Point { x: 21.0, y: 221.0 }] }
+  [0.96] 深色背景上的白色文字White text on dark background   bbox=BoundingBox { points: [Point { x: 22.0, y: 412.0 }, Point { x: 710.0, y: 413.0 }, Point { x: 710.0, y: 441.0 }, Point { x: 22.0, y: 439.0 }] }
+  [0.98] Settings >Model >HY-MT1.5-1.8B (Q4_K_M)   bbox=BoundingBox { points: [Point { x: 22.0, y: 469.0 }, Point { x: 466.0, y: 469.0 }, Point { x: 466.0, y: 493.0 }, Point { x: 22.0, y: 493.0 }] }
+
+== D:\Code\llm-translate\spikes\ocr\testdata\app-window.png  1372x956  predict: 58 ms
+  [0.96]  LLM Translate   bbox=BoundingBox { points: [Point { x: 20.0, y: 8.0 }, Point { x: 165.0, y: 8.0 }, Point { x: 165.0, y: 34.0 }, Point { x: 20.0, y: 34.0 }] }
+  [0.79] □   bbox=BoundingBox { points: [Point { x: 1245.0, y: 13.0 }, Point { x: 1266.0, y: 13.0 }, Point { x: 1266.0, y: 33.0 }, Point { x: 1245.0, y: 33.0 }] }
+  [0.51] X   bbox=BoundingBox { points: [Point { x: 1307.0, y: 10.0 }, Point { x: 1341.0, y: 10.0 }, Point { x: 1341.0, y: 36.0 }, Point { x: 1307.0, y: 36.0 }] }
+  [1.00] LLM Translate   bbox=BoundingBox { points: [Point { x: 45.0, y: 86.0 }, Point { x: 272.0, y: 89.0 }, Point { x: 272.0, y: 127.0 }, Point { x: 45.0, y: 124.0 }] }
+  [0.94] M0 骨架：窗口特效验证   bbox=BoundingBox { points: [Point { x: 42.0, y: 155.0 }, Point { x: 273.0, y: 155.0 }, Point { x: 273.0, y: 181.0 }, Point { x: 42.0, y: 181.0 }] }
+  [0.98] 系统 build:26200   bbox=BoundingBox { points: [Point { x: 68.0, y: 233.0 }, Point { x: 245.0, y: 233.0 }, Point { x: 245.0, y: 259.0 }, Point { x: 68.0, y: 259.0 }] }
+  [0.98] 窗口特效：Mica   bbox=BoundingBox { points: [Point { x: 69.0, y: 262.0 }, Point { x: 224.0, y: 263.0 }, Point { x: 224.0, y: 291.0 }, Point { x: 69.0, y: 289.0 }] }

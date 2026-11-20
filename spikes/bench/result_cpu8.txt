@@ -1,0 +1,9 @@
+[cpu-8t] load=1.61s args=-ngl 0 --device none -t 8
+  short-zh2en  ttft=    58ms total=   495ms tokens=  11   22.9 tok/s
+    -> Can this feature be used properly in terminals as well?
+  short-en2zh  ttft=    78ms total=   450ms tokens=   9   21.5 tok/s
+    -> 这个功能在终端中也能够正常使用吗？
+  para-en2zh   ttft=   169ms total=  2854ms tokens=  69   25.3 tok/s
+    -> 大型语言模型已经改变了软件的开发方式。开发者不再需要编写具体的规则，而是用自然语言来描述期望的行为，然后让模型自行推断出具体的实现细节。然而，这种转变也带来了新的挑战：在测试、延迟和成本方面都需要加以考虑。尤其是在模型在内存有限的消费级硬件上运行时，这些挑战更为突出。
+  para-zh2en   ttft=   169ms total=  3475ms tokens=  84   25.1 tok/s
+    -> The locally deployed translation models do not rely on the network, resulting in stable response times. Additionally, they do not upload users’ data to the cloud. However, such models have certain hardware requirements, and it’s necessary to balance factors such as model size, translation quality, and inference speed. For everyday tasks involving tagging and screenshot translation, a compact model that is well-suited for the task is usually sufficient.

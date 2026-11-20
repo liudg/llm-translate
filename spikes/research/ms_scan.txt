@@ -1,0 +1,101 @@
+339 models total, 238 created since 2025-06
+    24546 dl     8 star 2025-10-20 iflytek/Spark-Scilit-X1-13B  | Spark-Scilit-X1-13B
+    22920 dl    65 star 2025-08-28 Tencent-Hunyuan/Hunyuan-MT-7B  | Hunyuan-MT-7B
+    19319 dl    25 star 2026-04-28 AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF  | 
+    17047 dl    22 star 2026-05-25 Tencent-Hunyuan/Hy-MT2-1.8B-GGUF  | 
+    15483 dl    45 star 2025-12-27 Tencent-Hunyuan/HY-MT1.5-1.8B  | 
+    11134 dl     9 star 2026-04-28 AngelSlim/Hy-MT1.5-1.8B-2bit-GGUF  | 
+     9444 dl     0 star 2026-01-03 DevQuasar/tencent.HY-MT1.5-7B-GGUF  | 
+     9172 dl     1 star 2025-08-31 Tencent-Hunyuan/Hunyuan-MT-Chimera-7B-fp8  | Hunyuan-MT-Chimera-7B-fp8
+     9157 dl    26 star 2025-12-30 Tencent-Hunyuan/HY-MT1.5-1.8B-GGUF  | 
+     9003 dl    41 star 2026-05-12 Tencent-Hunyuan/Hy-MT2-1.8B  | 
+     8599 dl    19 star 2026-05-25 Tencent-Hunyuan/Hy-MT2-7B-GGUF  | 
+     7952 dl    18 star 2026-09-28 IndexTeam/Index-Translate-2B  | 
+     7684 dl     2 star 2026-01-04 DevQuasar/tencent.HY-MT1.5-1.8B-GGUF  | 
+     6090 dl    27 star 2026-05-12 Tencent-Hunyuan/Hy-MT2-7B  | 
+     5970 dl     0 star 2026-10-17 Helsinki-NLP/mammoth-eng_spa-g3a3-l3-h4d768  | 
+     4883 dl    17 star 2025-12-27 Tencent-Hunyuan/HY-MT1.5-7B  | 
+     4040 dl     2 star 2026-10-23 MooreThreads/DeepSeek-V4.1-Flash-1017-W4AFP8-mt  | 
+     3751 dl    30 star 2026-10-03 IndexTeam/Index-Translate-2B-GGUF  | 
+     3566 dl     3 star 2025-12-27 Tencent-Hunyuan/HY-MT1.5-1.8B-FP8  | 
+     3429 dl    10 star 2026-05-25 Tencent-Hunyuan/Hy-MT2-1.8B-1.25Bit-GGUF  | 
+     3400 dl     7 star 2025-08-15 Helsinki-NLP/opus-mt-zh-en  | 
+     3269 dl     0 star 2025-12-15 CodeJim/wmt23-cometkiwi-da-xl  | Unbabel/wmt23-cometkiwi-da-xl
+     3182 dl     0 star 2026-09-08 siliconflow/Hunyuan-MT-7B-SF-FP8  | 
+     3169 dl     0 star 2026-09-11 CohereLabs/North-Small-Translate-1.0  | 
+     3064 dl     9 star 2026-05-20 Tencent-Hunyuan/Hy-MT2-7B-FP8  | 
+     2959 dl     2 star 2025-11-06 evalscope/wmt22-comet-da  | 
+     2884 dl    11 star 2025-12-31 Tencent-Hunyuan/HY-MT1.5-7B-GGUF  | 
+     2682 dl     4 star 2025-09-04 DevQuasar/tencent.Hunyuan-MT-7B-GGUF  | 
+     2625 dl     9 star 2025-12-30 Tencent-Hunyuan/HY-MT1.5-1.8B-GPTQ-Int4  | 
+     2441 dl     2 star 2025-08-31 Tencent-Hunyuan/Hunyuan-MT-7B-fp8  | Hunyuan-MT-7B-fp8
+     2187 dl     0 star 2026-11-04 IndexTeam/Index-Translate-omni-35B  | 
+     1979 dl     6 star 2026-05-20 Tencent-Hunyuan/Hy-MT2-30B-A3B-FP8  | 
+     1924 dl    18 star 2026-10-03 IndexTeam/Index-Translate-9B-GGUF  | 
+     1805 dl     4 star 2025-12-27 Tencent-Hunyuan/HY-MT1.5-7B-FP8  | 
+     1753 dl     1 star 2025-08-15 Helsinki-NLP/opus-mt-en-zh  | 
+     1692 dl     7 star 2025-08-28 Tencent-Hunyuan/Hunyuan-MT-Chimera-7B  | Hunyuan-MT-Chimera-7B
+     1568 dl    11 star 2026-05-11 Tencent-Hunyuan/Hy-MT2-30B-A3B  | 
+     1526 dl     8 star 2026-01-12 sakuraumi/Sakura-14B-Qwen3-v1.5-GGUF  | 
+     1469 dl     2 star 2026-01-07 ByronLeeee/HY-MT1.5-1.8B_bf16_Q4_K_M-GGUF  | HY-MT1.5-1.8B_bf16_Q4_K_M-GGUF
+     1431 dl    59 star 2026-08-27 XHToken/Spark-X2.5-4B  | 
+     1305 dl     8 star 2026-05-20 Tencent-Hunyuan/Hy-MT2-1.8B-FP8  | 
+     1286 dl     3 star 2026-05-30 unsloth/Hy-MT2-7B-GGUF  | 
+     1241 dl     3 star 2026-05-23 fss618/Hy-MT2-1.8B-GGUF  | Hy-MT2-1.8B-GGUF
+     1076 dl     4 star 2026-05-25 Tencent-Hunyuan/Hy-MT2-1.8B-2Bit-GGUF  | 
+     1066 dl     9 star 2026-07-14 alphaZimuth/Hy-MT2-30B-A3B-APEX-GGUF  | 
+     1024 dl     3 star 2026-05-30 unsloth/Hy-MT2-1.8B-GGUF  | 
+      958 dl     2 star 2026-07-22 42ailab/TranslateGemma-4B-GGUF  | TranslateGemma-4B · 翻译大模型
+      712 dl     0 star 2026-09-11 CohereLabs/North-Small-Translate-1.0-w4a16  | 
+      708 dl     3 star 2026-05-21 AngelSlim/Hy-MT2-1.8B-1.25Bit-GGUF  | 
+      671 dl     0 star 2026-05-10 lingfeng2360/LEI_Embeddings  | 形态学分词模型
+      640 dl    22 star 2026-08-25 XHToken/Spark-X2.5-1.7B  | XHToken/Spark-X2.5-1.7B
+      534 dl     6 star 2026-04-28 AngelSlim/Hy-MT1.5-1.8B-1.25bit  | 
+      515 dl     0 star 2025-12-20 hgmzhn/manga-translator-ui  | manga-translator-ui
+      508 dl     2 star 2025-06-09 kleirof/Qwen3-1.7B-MT-en2zh-Gungeon-GGUF  | 
+      508 dl     1 star 2026-08-11 MooreThreads/DeepSeek-V4-Flash-0731-FP8-mt  | 
+      461 dl     1 star 2026-08-07 seuszmt/krea2-Lucy-MT  | 倪千凌
+      444 dl     1 star 2026-10-04 IndexTeam/Index-Translate-35B-A3B-preview-FP4  | 
+      417 dl    11 star 2026-10-03 IndexTeam/Index-Translate-35B-A3B-preview-GGUF  | 
+      415 dl     0 star 2025-09-14 OpenBuddy/SimpleTranslate-30BA3B-V1  | 
+      376 dl     4 star 2025-09-24 ATH-MaaS/Marco-MT-Algharb  | 
+      365 dl     2 star 2026-05-21 AngelSlim/Hy-MT2-1.8B-2Bit-GGUF  | 
+      361 dl     0 star 2025-06-06 mlx-community/plamo-2-translate-8bit  | 
+      344 dl    36 star 2026-10-24 Tencent-Hunyuan/Hy-SimulMT-30B-A3B-Interleave-GGUF  | 
+      341 dl     0 star 2025-06-08 sarvamai/sarvam-translate  | 
+      324 dl    11 star 2026-09-28 IndexTeam/Index-Translate-9B  | 
+      290 dl     4 star 2026-10-03 IndexTeam/Index-Translate-9B-FP8  | 
+      285 dl     0 star 2025-06-23 scb10x/typhoon-translate-4b  | 
+      274 dl     0 star 2025-06-06 mlx-community/plamo-2-translate-bf16  | 
+      270 dl     0 star 2025-06-05 shisa-ai/ablation-140-translation.dpo.test-shisa-v2-llama-3.1-8b  | 
+      247 dl     5 star 2026-09-10 netease-youdao/Confucius4-T3PO  | Confucius4-T3PO
+      241 dl     1 star 2026-07-22 42ailab/TranslateGemma-12B-GGUF  | TranslateGemma-12B · 翻译大模型
+      228 dl    24 star 2026-10-24 Tencent-Hunyuan/Hy-SimulMT-30B-A3B-GGUF  | 
+      224 dl     9 star 2026-04-28 AngelSlim/Hy-MT1.5-1.8B-2bit  | 
+      219 dl     0 star 2026-07-02 AngelSlim/Hy-MT2-1.8B-Q4-GGUF  | 
+      188 dl     0 star 2025-08-13 janhq/vi-translation_v0.1_20250612-230103_Qwen3-1.7B_checkpoint-500_en-vi  | 
+      187 dl     3 star 2026-01-10 BAAI/RoboBrain2.5-8B-MT  | 
+      184 dl    10 star 2026-10-24 Tencent-Hunyuan/Hy-SimulMT-30B-A3B-Interleave  | 
+      183 dl     0 star 2025-08-13 janhq/vi-translation_v0.1_20250612-230103_Qwen3-1.7B_checkpoint-500_vi-en  | 
+      183 dl    11 star 2026-10-24 Tencent-Hunyuan/Hy-SimulMT-30B-A3B-Interleave-FP8  | 
+      167 dl    24 star 2026-10-24 Tencent-Hunyuan/Hy-SimulMT-30B-A3B  | 
+      156 dl     0 star 2025-09-05 MNN/Hunyuan-MT-7B-MNN  | 
+      155 dl    13 star 2026-10-24 Tencent-Hunyuan/Hy-SimulMT-30B-A3B-FP8  | 
+      142 dl     6 star 2026-09-30 IndexTeam/Index-Translate-35B-A3B-preview  | 
+      132 dl     0 star 2026-11-15 DreamStarPaint/AetherTranslate-Qwen2-Audio-7B-int4  | AetherTranslate · Qwen2-Audio-7B · int4
+      131 dl     1 star 2026-07-10 42ailab/TranslateGemma-27B-GGUF  | TranslateGemma-27B · 翻译大模型
+      130 dl     3 star 2025-06-13 njauzwh/Qwen1.5-7B-poem  | 
+      125 dl     0 star 2025-08-26 trillionlabs/Tri-1.8B-Translation  | 
+      120 dl     4 star 2026-09-28 IndexTeam/Index-Nailong-9B  | 
+       93 dl     0 star 2026-10-03 IndexTeam/Index-Translate-35B-A3B-preview-FP8  | 
+       93 dl     0 star 2026-06-03 FlagRelease/HY-MT2-30B-A3B-hygon-FlagOS  | 
+       86 dl     1 star 2026-09-25 seuszmt/krea2-sy2-MT  | sy2
+       85 dl     0 star 2026-01-21 AXERA-TECH/Speech-Translation.axera  | 
+       83 dl     0 star 2026-11-04 IndexTeam/Index-Translate-omni-9B  | 
+       81 dl     0 star 2026-10-08 alphaZimuth/Index-Translate-35B-A3B-preview-APEX-GGUF  | 
+       75 dl     3 star 2026-07-25 jacksong123/Qwen-2.5-0.5b-instrunt-lora-J  | 轻语0.5B
+       72 dl     0 star 2026-11-05 pfnet/plamo-3-translate-0.8b-GGUF  | 
+       71 dl     0 star 2026-11-05 pfnet/plamo-3-translate-31b-GGUF  | 
+       71 dl     0 star 2025-10-13 maywell/Synatra-7B-v0.3-Translation  | 
+       71 dl     0 star 2026-07-30 liaowenbin/Hy-MT2-1.8B-Q4_K_M-GGUF  | Hy-MT2 1.8B Q4_K_M
+       70 dl     0 star 2026-04-02 TaitaiPhu/Qwen3-4B-Classical-Chinese-Translation  | Qwen3-4B-Classical-Chinese-Translation

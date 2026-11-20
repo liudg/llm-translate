@@ -1,0 +1,236 @@
+
+====================================================================================================
+IndexTeam/Index-Translate-2B
+created=2026-09-28 likes=81 base=None lang=None license=apache-2.0
+files: ['config.json', 'generation_config.json', 'model.safetensors', 'preprocessor_config.json', 'tokenizer.json', 'tokenizer_config.json', 'video_preprocessor_config.json', 'vocab.json']
+  | license: apache-2.0
+  | **Index-Translate-2B** is the compact 2B-parameter multilingual text model of the **Index-Translate** family, built on Qwen3.5. It supports text translation across **150 languages** and follows translation instructions involving terminology, formatting, style, structure, context, and output length.
+  | - **Multimodal image translation (多模态图片翻译):** natively supports end-to-end image-to-text translation across 150 languages without external OCR tools, powered by companion visual encoders (`mmproj`).
+  | - **General multilingual translation:** translate sentences, articles, subtitles, and other text across the supported language inventory.
+  | - Outperforms Hy-MT2-1.8B on every main translation metric reported for both models in the technical report.
+  | Language coverage is documented in the technical report's language inventory. The speech and long-document models have their own packaged interfaces and language coverage.
+  | 2. **Specialist SFT and RL:** general translation, instruction following, and meme translation specialists receive task-specific supervision. General translation RL combines XCOMET-XXL with language-validity and adequacy judgments; instruction RL uses Rubric-as-Reward with hard checks and graded constraints. RIVAL provides adaptive judge supervision.
+  | Results below reproduce the latest technical report. Comparisons apply to the report's evaluation data and settings, and metric scales differ. Higher is better except for off-target rates. These are individual benchmark scores, separate from the demo's normalized radar categories.
+  | ### Main translation benchmarks
+  | WMT26 Judge uses a **0–100** scale; the other columns use **0–1**. instTrans quality and IFscore measure translation quality and instruction adherence separately. IFMTBench reports reference-based XCOMET-XXL and instruction adherence. Vertical is the equal-weight mean of the five domain scores below. North-Small-Translate is the **218B-A25B** model; TranslateGemma is **translategemma-12b-it**.
+  | | Model | FLORES COMET-22 | WMT24++ COMET-22 | WMT26 Judge | instTrans Quality | instTrans IFscore | IFMTBench XCOMET-XXL | IFMTBench IFscore | Vertical mean | MEME |
+  | **FLORES_minor_pair** contains **104,000 inputs** across **1,040 directions among 62 languages**. **instTrans_minor** contains **2,793 instruction-translation tasks** from Chinese or English into low-resource languages. Off-target is the percentage of outputs in a language other than the requested target; lower is better. The other scores use a 0–1 scale.
+  | | Model | FLORES_minor_pair COMET-22 ↑ | FLORES_minor_pair XCOMET-XXL ↑ | FLORES_minor_pair off-target ↓ | instTrans_minor Quality ↑ | instTrans_minor IFscore ↑ | instTrans_minor off-target ↓ |
+  | COMET-22 is used for OPUS-Books, WMT Biomedical, MTNT, and MuST-Cinema; GuoFeng-Webnovel uses document-COMET. Higher is better. The complete comparison is in the report.
+  | - The main FLORES evaluation uses **126,000 inputs**, 420 directions among 21 languages; WMT24++ uses 6,000 inputs from English into 20 languages.
+  | - instTrans has **3,000 Chinese-to-20-language tasks** across ten constraint types. GPT-5.6-Sol judges quality and instruction adherence separately. MEME contains **3,638 Chinese-to-English cases**, covering 703 terms and 857 disambiguated senses.
+  | - Text translation evaluation uses **greedy decoding and a 16,384-token context window**, except WMT26, which uses zero-shot Chinese instructions, a **3,584-token context**, and a **1,536-token output limit**. WMT26 reference-free GPT-5.6-Sol scores are averaged over 20 target languages.
+  | - IFMTBench starts with 7,344 examples. Preprocessing removes 280 single-constraint examples with reference or language-label issues, leaving **7,064 inputs**; **7,063 receive valid judgments**. See the [preprocessing note](https://github.com/bilibili/Index-Translate/blob/main/docs/evaluation.md#ifmtbench-preprocessing).
+  | | Thinking | Disabled through `chat_template_kwargs={"enable_thinking": False}`; no thinking toggle in this CLI |
+  | | Source language | `auto`; override with `--source` / `-s`; auto omits the source-language name from the prompt |
+  | | Target language | `en`; override with `--target` / `-t` |
+  | | Raw prompt | `--raw-prompt`; directly send input text without template wrapping |
+  | The client maps supported short language codes to Chinese language names in the prompt. Provide the full language name for a code outside its mapping.
+  | 请将以下{source-language}文本翻译为{target-language}，直接输出翻译结果，不要进行任何解释。
+  | 请将以下{source-language}{genre}翻译成{target-language}，并且严格遵循所有约束要求。
+  | With `--source auto`, `{source-language}` is omitted. Prompt length, source text, and generated output all count toward the served context. Parameters left unspecified above are not assigned new fixed values by this model card.
+  | This example uses the training-aligned Chinese translation prompt and disables thinking explicitly:
+  | "content": "请将以下文本翻译为英语，直接输出翻译结果，不要进行任何解释。\n\n你好，世界！",
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+  | prompt_with_constraints = """请将以下专栏文章翻译成英语，并且严格遵循所有约束要求。
+  | messages=[{"role": "user", "content": prompt_with_constraints}],
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+  | The model natively supports end-to-end multimodal image translation across 150 languages (**zero OCR dependency**), directly projecting image features into latent semantic space:
+  | {"type": "text", "text": "请将图片中的英文文本翻译为中文，直接输出翻译结果，不要进行任何解释。"},
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+  | python inference/llm/call_api.py --image test.png --target zh -m Index-Translate-2B
+  | Or test it directly in the interactive [Web Demo](https://index-translate.bilibili.com/?p=/site/translate.html). For quantized GGUF weights and visual projector files (`mmproj`), see [Index-Translate-2B-GGUF](https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF). Full tutorial: [Multimodal Image Translation Guide](https://github.com/bilibili/Index-Translate/blob/main/docs/image_translate.md).
+  | Use `--source` to specify the input language and `--target` for the output language. For languages without a mapped code in the client, provide the full language name. The client also accepts `--base-url`, `--api-key`, `--max-tokens`, and `--temperature`.
+  | Scores vary across languages and tasks. Combined constraints and low-resource directions remain harder than core-language translation, and successful individual examples do not guarantee that every instruction will be followed. For explicit target syllable counts, use Index-Homura; for native full-document translation, use Index-NativeLong with its dedicated templates.
+  | **Naming:** Index-NativeLong retains the published model IDs `IndexTeam/Index-Nailong-2B` and `IndexTeam/Index-Nailong-9B`. The [family repository](https://github.com/bilibili/Index-Translate) includes prompt guides, browser-extension code, and a video-dubbing pipeline. This model's [ModelScope page](https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B) mirrors the model card.
+  | author={Tianjiao Li and Mengran Yu and Chenyu Shi and Lusheng Zhang and
+  | Qisi Chen and Yanshan Zhou and Ji Qi and Jingying Liu and
+  | ## License
+  | [Apache-2.0](https://github.com/bilibili/Index-Translate/blob/main/LICENSE). Questions and feedback are welcome through [GitHub Issues](https://github.com/bilibili/Index-Translate/issues).
+
+====================================================================================================
+IndexTeam/Index-Translate-9B
+created=2026-09-28 likes=45 base=None lang=None license=apache-2.0
+files: ['config.json', 'generation_config.json', 'model-00001-of-00004.safetensors', 'model-00002-of-00004.safetensors', 'model-00003-of-00004.safetensors', 'model-00004-of-00004.safetensors', 'model.safetensors.index.json', 'preprocessor_config.json', 'tokenizer.json', 'tokenizer_config.json', 'video_preprocessor_config.json', 'vocab.json']
+  | license: apache-2.0
+  | **Index-Translate-9B** is the 9B-parameter multilingual text model of the **Index-Translate** family, built on Qwen3.5. It supports text translation across **150 languages** and follows translation instructions involving terminology, formatting, style, structure, context, and output length.
+  | - **Multimodal image translation (多模态图片翻译):** natively supports end-to-end image-to-text translation across 150 languages without external OCR tools, powered by companion visual encoders (`mmproj`).
+  | - **General multilingual translation:** translate sentences, articles, subtitles, and other text across the supported language inventory.
+  | - Scores **0.8789 FLORES COMET-22**, **75.35 WMT26 Judge**, and **0.8209 instTrans IFscore** on the report's main evaluation.
+  | - Leads the report's compared models on **MuST-Cinema COMET-22 (0.8979)** and scores **0.7387 MEME**.
+  | Language coverage is documented in the technical report's language inventory. The speech and long-document models have their own packaged interfaces and language coverage.
+  | 2. **Specialist SFT and RL:** general translation, instruction following, and meme translation specialists receive task-specific supervision. General translation RL combines XCOMET-XXL with language-validity and adequacy judgments; instruction RL uses Rubric-as-Reward with hard checks and graded constraints. RIVAL provides adaptive judge supervision.
+  | Results below reproduce the latest technical report. Comparisons apply to the report's evaluation data and settings, and metric scales differ. Higher is better except for off-target rates. These are individual benchmark scores, separate from the demo's normalized radar categories.
+  | ### Main translation benchmarks
+  | WMT26 Judge uses a **0–100** scale; the other columns use **0–1**. instTrans quality and IFscore measure translation quality and instruction adherence separately. IFMTBench reports reference-based XCOMET-XXL and instruction adherence. Vertical is the equal-weight mean of the five domain scores below. North-Small-Translate is the **218B-A25B** model; TranslateGemma is **translategemma-12b-it**.
+  | | Model | FLORES COMET-22 | WMT24++ COMET-22 | WMT26 Judge | instTrans Quality | instTrans IFscore | IFMTBench XCOMET-XXL | IFMTBench IFscore | Vertical mean | MEME |
+  | **FLORES_minor_pair** contains **104,000 inputs** across **1,040 directions among 62 languages**. **instTrans_minor** contains **2,793 instruction-translation tasks** from Chinese or English into low-resource languages. Off-target is the percentage of outputs in a language other than the requested target; lower is better. The other scores use a 0–1 scale.
+  | | Model | FLORES_minor_pair COMET-22 ↑ | FLORES_minor_pair XCOMET-XXL ↑ | FLORES_minor_pair off-target ↓ | instTrans_minor Quality ↑ | instTrans_minor IFscore ↑ | instTrans_minor off-target ↓ |
+  | COMET-22 is used for OPUS-Books, WMT Biomedical, MTNT, and MuST-Cinema; GuoFeng-Webnovel uses document-COMET. Higher is better. The complete comparison is in the report.
+  | - The main FLORES evaluation uses **126,000 inputs**, 420 directions among 21 languages; WMT24++ uses 6,000 inputs from English into 20 languages.
+  | - instTrans has **3,000 Chinese-to-20-language tasks** across ten constraint types. GPT-5.6-Sol judges quality and instruction adherence separately. MEME contains **3,638 Chinese-to-English cases**, covering 703 terms and 857 disambiguated senses.
+  | - Text translation evaluation uses **greedy decoding and a 16,384-token context window**, except WMT26, which uses zero-shot Chinese instructions, a **3,584-token context**, and a **1,536-token output limit**. WMT26 reference-free GPT-5.6-Sol scores are averaged over 20 target languages.
+  | - IFMTBench starts with 7,344 examples. Preprocessing removes 280 single-constraint examples with reference or language-label issues, leaving **7,064 inputs**; **7,063 receive valid judgments**. See the [preprocessing note](https://github.com/bilibili/Index-Translate/blob/main/docs/evaluation.md#ifmtbench-preprocessing).
+  | | Thinking | Disabled through `chat_template_kwargs={"enable_thinking": False}`; no thinking toggle in this CLI |
+  | | Source language | `auto`; override with `--source` / `-s`; auto omits the source-language name from the prompt |
+  | | Target language | `en`; override with `--target` / `-t` |
+  | | Raw prompt | `--raw-prompt`; directly send input text without template wrapping |
+  | The client maps supported short language codes to Chinese language names in the prompt. Provide the full language name for a code outside its mapping.
+  | 请将以下{source-language}文本翻译为{target-language}，直接输出翻译结果，不要进行任何解释。
+  | 请将以下{source-language}{genre}翻译成{target-language}，并且严格遵循所有约束要求。
+  | With `--source auto`, `{source-language}` is omitted. Prompt length, source text, and generated output all count toward the served context. Parameters left unspecified above are not assigned new fixed values by this model card.
+  | This example uses the training-aligned Chinese translation prompt and disables thinking explicitly:
+  | "content": "请将以下文本翻译为英语，直接输出翻译结果，不要进行任何解释。\n\n你好，世界！",
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+  | prompt_with_constraints = """请将以下专栏文章翻译成英语，并且严格遵循所有约束要求。
+  | messages=[{"role": "user", "content": prompt_with_constraints}],
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+  | The model natively supports end-to-end multimodal image translation across 150 languages (**zero OCR dependency**), directly projecting image features into latent semantic space:
+  | {"type": "text", "text": "请将图片中的英文文本翻译为中文，直接输出翻译结果，不要进行任何解释。"},
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+  | python inference/llm/call_api.py --image test.png --target zh -m Index-Translate-9B
+  | Or test it directly in the interactive [Web Demo](https://index-translate.bilibili.com/?p=/site/translate.html). For quantized GGUF weights and visual projector files (`mmproj`), see [Index-Translate-9B-GGUF](https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF). Full tutorial: [Multimodal Image Translation Guide](https://github.com/bilibili/Index-Translate/blob/main/docs/image_translate.md).
+  | Use `--source` to specify the input language and `--target` for the output language. For languages without a mapped code in the client, provide the full language name. The client also accepts `--base-url`, `--api-key`, `--max-tokens`, and `--temperature`.
+  | The following is a recorded Index-Translate-9B case from the official demo. The task asks for Korean translation while preserving the JSON structure, stars, and Chinese hashtag.
+  | Scores vary across languages and tasks. Combined constraints and low-resource directions remain harder than core-language translation, and successful individual examples do not guarantee that every instruction will be followed. For explicit target syllable counts, use Index-Homura; for native full-document translation, use Index-NativeLong with its dedicated templates.
+  | **Naming:** Index-NativeLong retains the published model IDs `IndexTeam/Index-Nailong-2B` and `IndexTeam/Index-Nailong-9B`. The [family repository](https://github.com/bilibili/Index-Translate) includes prompt guides, browser-extension code, and a video-dubbing pipeline. This model's [ModelScope page](https://www.modelscope.cn/models/IndexTeam/Index-Translate-9B) mirrors the model card.
+  | author={Tianjiao Li and Mengran Yu and Chenyu Shi and Lusheng Zhang and
+  | Qisi Chen and Yanshan Zhou and Ji Qi and Jingying Liu and
+  | ## License
+
+====================================================================================================
+IndexTeam/Index-Translate-35B-A3B-preview
+created=2026-10-02 likes=8 base=None lang=None license=apache-2.0
+files: ['backup-manifest.json', 'config.json', 'generation_config.json', 'model-00001-of-00015.safetensors', 'model-00002-of-00015.safetensors', 'model-00003-of-00015.safetensors', 'model-00004-of-00015.safetensors', 'model-00005-of-00015.safetensors', 'model-00006-of-00015.safetensors', 'model-00007-of-00015.safetensors', 'model-00008-of-00015.safetensors', 'model-00009-of-00015.safetensors']
+  | license: apache-2.0
+  | **Index-Translate-35B-A3B-preview** is the 35B-total / 3B-active mixture-of-experts multilingual text model of the **Index-Translate** family, built on Qwen3.5. It supports text translation across **150 languages** and follows translation instructions involving terminology, formatting, style, structure, context, and output length.
+  | - **Multimodal image translation (多模态图片翻译):** natively supports end-to-end image-to-text translation across 150 languages without external OCR tools, powered by companion visual encoders (`mmproj`).
+  | - **General multilingual translation:** translate sentences, articles, subtitles, and other text across the supported language inventory.
+  | - Has the highest **FLORES COMET-22 (0.8794)** and **instTrans IFscore (0.8336)** among all comparison systems in the report.
+  | - Scores **0.6901 instTrans quality**, **76.76 WMT26 Judge**, and **0.7405 MEME**.
+  | - Among the three Index-Translate models, has the highest low-resource FLORES COMET-22 / XCOMET-XXL (**0.8168 / 0.7164**), with **2.4% off-target outputs**. On low-resource instTrans, it scores **0.5151 quality / 0.7715 IFscore**, with **4.05% off-target outputs**.
+  | Language coverage is documented in the technical report's language inventory. The speech and long-document models have their own packaged interfaces and language coverage.
+  | 2. **Specialist SFT and RL:** general translation, instruction following, and meme translation specialists receive task-specific supervision. General translation RL combines XCOMET-XXL with language-validity and adequacy judgments; instruction RL uses Rubric-as-Reward with hard checks and graded constraints. RIVAL provides adaptive judge supervision.
+  | Results below reproduce the latest technical report. Comparisons apply to the report's evaluation data and settings, and metric scales differ. Higher is better except for off-target rates. These are individual benchmark scores, separate from the demo's normalized radar categories.
+  | ### Main translation benchmarks
+  | WMT26 Judge uses a **0–100** scale; the other columns use **0–1**. instTrans quality and IFscore measure translation quality and instruction adherence separately. IFMTBench reports reference-based XCOMET-XXL and instruction adherence. Vertical is the equal-weight mean of the five domain scores below. North-Small-Translate is the **218B-A25B** model; TranslateGemma is **translategemma-12b-it**.
+  | | Model | FLORES COMET-22 | WMT24++ COMET-22 | WMT26 Judge | instTrans Quality | instTrans IFscore | IFMTBench XCOMET-XXL | IFMTBench IFscore | Vertical mean | MEME |
+  | **FLORES_minor_pair** contains **104,000 inputs** across **1,040 directions among 62 languages**. **instTrans_minor** contains **2,793 instruction-translation tasks** from Chinese or English into low-resource languages. Off-target is the percentage of outputs in a language other than the requested target; lower is better. The other scores use a 0–1 scale.
+  | | Model | FLORES_minor_pair COMET-22 ↑ | FLORES_minor_pair XCOMET-XXL ↑ | FLORES_minor_pair off-target ↓ | instTrans_minor Quality ↑ | instTrans_minor IFscore ↑ | instTrans_minor off-target ↓ |
+  | COMET-22 is used for OPUS-Books, WMT Biomedical, MTNT, and MuST-Cinema; GuoFeng-Webnovel uses document-COMET. Higher is better. The complete comparison is in the report.
+  | - The main FLORES evaluation uses **126,000 inputs**, 420 directions among 21 languages; WMT24++ uses 6,000 inputs from English into 20 languages.
+  | - instTrans has **3,000 Chinese-to-20-language tasks** across ten constraint types. GPT-5.6-Sol judges quality and instruction adherence separately. MEME contains **3,638 Chinese-to-English cases**, covering 703 terms and 857 disambiguated senses.
+  | - Text translation evaluation uses **greedy decoding and a 16,384-token context window**, except WMT26, which uses zero-shot Chinese instructions, a **3,584-token context**, and a **1,536-token output limit**. WMT26 reference-free GPT-5.6-Sol scores are averaged over 20 target languages.
+  | - IFMTBench starts with 7,344 examples. Preprocessing removes 280 single-constraint examples with reference or language-label issues, leaving **7,064 inputs**; **7,063 receive valid judgments**. See the [preprocessing note](https://github.com/bilibili/Index-Translate/blob/main/docs/evaluation.md#ifmtbench-preprocessing).
+  | | Thinking | Disabled through `chat_template_kwargs={"enable_thinking": False}`; no thinking toggle in this CLI |
+  | | Source language | `auto`; override with `--source` / `-s`; auto omits the source-language name from the prompt |
+  | | Target language | `en`; override with `--target` / `-t` |
+  | | Raw prompt | `--raw-prompt`; directly send input text without template wrapping |
+  | The client maps supported short language codes to Chinese language names in the prompt. Provide the full language name for a code outside its mapping.
+  | 请将以下{source-language}文本翻译为{target-language}，直接输出翻译结果，不要进行任何解释。
+  | 请将以下{source-language}{genre}翻译成{target-language}，并且严格遵循所有约束要求。
+  | With `--source auto`, `{source-language}` is omitted. Prompt length, source text, and generated output all count toward the served context. Parameters left unspecified above are not assigned new fixed values by this model card.
+  | This example uses the training-aligned Chinese translation prompt and disables thinking explicitly:
+  | "content": "请将以下文本翻译为英语，直接输出翻译结果，不要进行任何解释。\n\n你好，世界！",
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+  | prompt_with_constraints = """请将以下专栏文章翻译成英语，并且严格遵循所有约束要求。
+  | messages=[{"role": "user", "content": prompt_with_constraints}],
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+  | The model natively supports end-to-end multimodal image translation across 150 languages (**zero OCR dependency**), directly projecting image features into latent semantic space:
+  | {"type": "text", "text": "请将图片中的英文文本翻译为中文，直接输出翻译结果，不要进行任何解释。"},
+  | extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+  | python inference/llm/call_api.py --image test.png --target zh -m Index-Translate-35B-A3B-preview
+  | Use `--source` to specify the input language and `--target` for the output language. For languages without a mapped code in the client, provide the full language name. The client also accepts `--base-url`, `--api-key`, `--max-tokens`, and `--temperature`.
+  | Scores vary across languages and tasks. Combined constraints and low-resource directions remain harder than core-language translation, and successful individual examples do not guarantee that every instruction will be followed. For explicit target syllable counts, use Index-Homura; for native full-document translation, use Index-NativeLong with its dedicated templates.
+  | author={Tianjiao Li and Mengran Yu and Chenyu Shi and Lusheng Zhang and
+  | Qisi Chen and Yanshan Zhou and Ji Qi and Jingying Liu and
+  | ## License
+  | [Apache-2.0](https://github.com/bilibili/Index-Translate/blob/main/LICENSE). Questions and feedback are welcome through [GitHub Issues](https://github.com/bilibili/Index-Translate/issues).
+
+====================================================================================================
+netease-youdao/Confucius4-T3PO
+created=2026-09-07 likes=80 base=['Qwen/Qwen2.5-14B'] lang=['zh', 'en'] license=apache-2.0
+files: ['added_tokens.json', 'config.json', 'generation_config.json', 'model-00001-of-00008.safetensors', 'model-00002-of-00008.safetensors', 'model-00003-of-00008.safetensors', 'model-00004-of-00008.safetensors', 'model-00005-of-00008.safetensors', 'model-00006-of-00008.safetensors', 'model-00007-of-00008.safetensors', 'model-00008-of-00008.safetensors', 'model.safetensors.index.json']
+  | language:
+  | - zh
+  | license: apache-2.0
+  | - zh-en
+  | - en-zh
+  | - **Retained general instruction-following ability:** training does not degrade the general instruction-following ability of the Qwen base model, so further capabilities can be built on top of it, such as terminology constraints.
+  | - **Cross-lingual generalization:** the model exhibits a degree of cross-lingual generalization. We observe that Japanese-to-Chinese, which was not trained, also supports streaming translation, though quality on directions other than Chinese and English has not been rigorously evaluated.
+  | We evaluate Confucius4-T3PO on several public benchmarks for Chinese-to-English and English-to-Chinese simultaneous translation. We compare it against the open-source models [InfiniSST](https://aclanthology.org/2025.findings-acl.157.pdf) and [EAST](https://aclanthology.org/2025.findings-acl.1045.pdf), as well as two major commercial simultaneous translation systems, A and B.
+  | ![External evaluation: COMET vs. word-CW](assets/figures/external_comparison_comet_word_cw.png)
+  | ![Training frontier: COMET vs. average segment length](assets/figures/training_frontier_comet_seglen.png)
+  | | Confucius4-T3PO-GGUF | [🤗 Hugging Face](https://huggingface.co/netease-youdao/Confucius4-T3PO-GGUF) | [ModelScope](https://modelscope.cn/models/netease-youdao/Confucius4-T3PO-GGUF) |
+  | The user message sent to the model consists of a task prompt and two labelled blocks:
+  | {task_prompt}
+  | DIRECTION = "zh2en"  # use "en2zh" for English-to-Chinese
+  | ROLE = {"zh2en": "Chinese-to-English", "en2zh": "English-to-Chinese"}
+  | TARGET = {"zh2en": "English", "en2zh": "Chinese"}
+  | def task_prompt(direction: str) -> str:
+  | f"{task_prompt(direction)}\n\n"
+  | prompt = tokenizer.apply_chat_template(
+  | add_generation_prompt=True,
+  | inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+  | {"role": "user", "content": "<the task_prompt and the two blocks above, joined>"}
+  | This model is released under the Apache License 2.0. Users must also comply with the licenses of the Qwen base model, the tokenizer, the training data, and any external ASR model used with it.
+
+====================================================================================================
+CohereLabs/North-Small-Translate-1.0
+created=2026-08-14 likes=67 base=None lang=['en', 'sq', 'ar', 'bg', 'bn', 'ca', 'cs', 'da', 'de', 'el', 'es', 'et', 'fa', 'fi', 'fil', 'fr', 'ga', 'he', 'hi', 'hr', 'hu', 'id', 'is', 'it', 'ja', 'ko', 'lt', 'lv', 'ms', 'mt', 'nl', 'no', 'pa', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sr', 'sv', 'ta', 'te', 'th', 'tr', 'uk', 'ur', 'vi', 'zh'] license=cc-by-nc-4.0
+files: ['config.json', 'generation_config.json', 'model.safetensors.index.json', 'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json', 'worker-000-000.safetensors', 'worker-000-001.safetensors', 'worker-000-002.safetensors', 'worker-000-003.safetensors', 'worker-000-004.safetensors', 'worker-001-000.safetensors']
+  ERROR HTTP Error 401: Unauthorized
+
+====================================================================================================
+nvidia/Riva-Translate-4B-Instruct-v2
+created=2026-04-15 likes=25 base=['nvidia/Mistral-NeMo-12B-Base'] lang=None license=None
+files: ['config.json', 'model-00001-of-00002.safetensors', 'model-00002-of-00002.safetensors', 'model.safetensors.index.json', 'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json']
+  | license_name: nvidia-open-model-license
+  | license_link: >-
+  | https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/
+  | ## License
+  | GOVERNING TERMS: Use of the model is governed by the [NVIDIA Open Model License Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) ADDITIONAL INFORMATION: [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+  | ### How to Choose the Language Pair
+  | To select a language pair for translation, include one of the following tags in the system prompt:
+  | * `en-zh-cn` or `en-zh`: English to Simplified Chinese
+  | * `en-zh-tw`: English to Traditional Chinese
+  | * `zh-en` or `zh-cn-en`: Simplified Chinese to English
+  | * `zh-tw-en`: Traditional Chinese to English
+  | "content": "en-zh-cn",
+  | tokenized_chat = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_tensors="pt").to(model.device)
+  | {"role": "system", "content": "en-zh"},
+  | ### Chat Template Structure
+  | {%- set language_pairs = {
+  | 'en-zh-cn': {'source': 'English', 'target': 'Simplified Chinese'},
+  | 'en-zh': {'source': 'English', 'target': 'Simplified Chinese'},
+  | 'en-zh-tw': {'source': 'English', 'target': 'Traditional Chinese'},
+  | 'zh-en': {'source': 'Simplified Chinese', 'target': 'English'},
+  | 'zh-cn-en': {'source': 'Simplified Chinese', 'target': 'English'},
+  | 'zh-tw-en': {'source': 'Traditional Chinese', 'target': 'English'},
+  | {%- if lang_pair in language_pairs -%}
+  | {%- set source_lang = language_pairs[lang_pair]['source'] -%}
+  | {%- set target_lang = language_pairs[lang_pair]['target'] -%}
+  | {%- if add_generation_prompt -%}
+  | ### FLORES-101 — En→Any
+  | | Target Language | sacreBLEU | COMET-DA | XCOMET-XXL |
+  | | Simplified Chinese | 40.20 | 0.68 | 0.91 |
+  | | Traditional Chinese | 34.80 | 0.67 | 0.91 |
+  | ### FLORES-101 — Any→En
+  | | Source Language | sacreBLEU | COMET-DA | XCOMET-XXL |
+  | | Simplified Chinese | 30.00 | 0.72 | 0.96 |
+  | | Traditional Chinese | 29.00 | 0.70 | 0.94 |
+  | ### WMT24++ — En→Any
+  | | Target Language | sacreBLEU | COMET-DA | XCOMET-XXL |
+  | | Simplified Chinese | 34.90 | 0.47 | 0.80 |
+  | | Traditional Chinese | 32.50 | 0.54 | 0.82 |
+  | ### WMT24++ — Any→En
+  | | Source Language | sacreBLEU | COMET-DA | XCOMET-XXL |
+  | | Simplified Chinese | 23.60 | 0.53 | 0.88 |
+  | | Traditional Chinese | 29.50 | 0.61 | 0.90 |
+  | Accuracy varies based on the characteristics of input (Domain, Use Case, Noise, Context, etc.). Grammar errors and semantic issues may be present. As a potential mitigation, the user can change the prompt to get a better translation.
+
+====================================================================================================
+translated/Lara-4-Mini-Base
+created=2026-11-11 likes=34 base=None lang=['en', 'ar', 'az', 'bg', 'bn', 'bs', 'ca', 'cs', 'da', 'de', 'el', 'es', 'et', 'fa', 'fi', 'fr', 'ga', 'he', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'lt', 'lv', 'ms', 'mt', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sr', 'sv', 'th', 'tr', 'uk', 'vi', 'zh'] license=cc-by-nc-sa-4.0
+files: ['config.json', 'generation_config.json', 'model-00001-of-00003.safetensors', 'model-00002-of-00003.safetensors', 'model-00003-of-00003.safetensors', 'model.safetensors.index.json', 'tokenizer.json', 'tokenizer_config.json']
+  ERROR HTTP Error 401: Unauthorized

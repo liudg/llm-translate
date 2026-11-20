@@ -1,0 +1,9 @@
+[vulkan-gpu-2nd] load=1.78s args=-ngl 99
+  short-zh2en  ttft=    44ms total=   122ms tokens=  11  129.2 tok/s
+    -> Can this feature be used normally in terminals as well?
+  short-en2zh  ttft=    48ms total=   106ms tokens=   8  120.8 tok/s
+    -> 这个功能在终端中也能正常使用吗？
+  para-en2zh   ttft=    58ms total=   512ms tokens=  68  147.7 tok/s
+    -> 大型语言模型已经改变了软件的开发方式。开发者不再需要编写明确的规则，而是用自然语言来描述期望的行为，然后让模型自行推断出具体的实现细节。不过，这种转变也带来了新的挑战：在测试、延迟以及成本方面都需要加以考虑。尤其是在模型运行在内存有限的消费级硬件上时，这些问题更为突出。
+  para-zh2en   ttft=    45ms total=   600ms tokens=  83  147.9 tok/s
+    -> The locally deployed translation models do not rely on the network, resulting in stable response times. Additionally, they do not upload users’ data to the cloud. However, such models have certain requirements regarding hardware capabilities, and it is necessary to balance factors such as model size, translation quality, and reasoning speed. For everyday tasks involving text tagging and screenshot translation, a smaller, well-optimized model is usually sufficient.
