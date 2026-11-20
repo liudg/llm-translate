@@ -14,13 +14,14 @@
       {
         "label": "main",
         "title": "LLM Translate",
-        "width": 900,
-        "height": 600,
-        "minWidth": 640,
+        "width": 960,
+        "height": 640,
+        "minWidth": 560,
         "minHeight": 420,
         "transparent": true,
         "center": true,
-        "visible": false
+        "visible": false,
+        "create": false
       },
       {
         "label": "wizard",
@@ -31,7 +32,22 @@
         "minHeight": 520,
         "transparent": true,
         "center": true,
-        "visible": false
+        "visible": false,
+        "create": false
+      },
+      {
+        "label": "mini",
+        "title": "LLM Translate · 迷你翻译",
+        "width": 620,
+        "height": 64,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": true,
+        "create": false
       }
     ],
     "security": {

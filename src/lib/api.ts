@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type Backend = "vulkan" | "cpu";
 export type Direction = "zh2En" | "en2Zh";
+export type Theme = "system" | "light" | "dark";
 
 export interface Settings {
   deployed: boolean;
@@ -13,6 +14,22 @@ export interface Settings {
   device: string | null;
   threads: number;
   idleReleaseMinutes: number;
+  theme: Theme;
+}
+
+export interface AppInfo {
+  version: string;
+  osBuild: number;
+  effect: "Mica" | "Acrylic";
+  configDir: string;
+  logsDir: string;
+}
+
+export interface HotkeyInfo {
+  id: "mini";
+  keys: string;
+  registered: boolean;
+  error: string | null;
 }
 
 export interface GpuDevice {
@@ -99,7 +116,7 @@ export type InferenceStatus =
 export type InferenceNotice = { kind: "fellBackToCpu"; reason: string };
 
 export type TranslateEvent =
-  | { type: "start"; direction: Direction }
+  | { type: "start"; direction: Direction; mixed: boolean }
   | { type: "delta"; text: string }
   | { type: "done"; elapsedMs: number }
   | { type: "error"; message: string }
@@ -119,6 +136,15 @@ export const api = {
   finish: () => invoke<void>("deploy_finish"),
   openWizard: () => invoke<void>("open_wizard"),
   openLogsDir: () => invoke<void>("open_logs_dir"),
+  openModelsDir: () => invoke<void>("open_models_dir"),
+  openMini: () => invoke<void>("open_mini"),
+  appInfo: () => invoke<AppInfo>("app_info"),
+  hotkeys: () => invoke<HotkeyInfo[]>("hotkey_status"),
+  hardware: () => invoke<HardwareInfo>("hardware_info"),
+  setTheme: (theme: Theme) => invoke<void>("set_theme", { theme }),
+  setIdleRelease: (minutes: number) => invoke<void>("set_idle_release", { minutes }),
+  setInference: (backend: Backend, device: string | null, threads: number) =>
+    invoke<void>("set_inference", { backend, device, threads }),
   cancelTranslate: () => invoke<void>("translate_cancel"),
   translate: (text: string, direction: Direction | null, onEvent: (e: TranslateEvent) => void) => {
     const ch = new Channel<TranslateEvent>();
@@ -133,6 +159,7 @@ export const events = {
   launch: (cb: (e: LaunchEvent) => void) => listen<LaunchEvent>("deploy-launch", (e) => cb(e.payload)),
   status: (cb: (s: InferenceStatus) => void) => listen<InferenceStatus>("inference-status", (e) => cb(e.payload)),
   notice: (cb: (n: InferenceNotice) => void) => listen<InferenceNotice>("inference-notice", (e) => cb(e.payload)),
+  settings: (cb: (s: Settings) => void) => listen<Settings>("settings-changed", (e) => cb(e.payload)),
 };
 
 /** Tauri rejects with the serialized error value; normalize to text. */

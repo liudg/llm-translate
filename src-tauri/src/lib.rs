@@ -7,33 +7,19 @@ pub mod translate;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
 use tauri::ipc::Channel;
-use tauri::window::{Effect, EffectsBuilder};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
+use app::commands::AppInfo;
+use app::hotkey::Hotkeys;
 use app::settings::{Backend, Settings, SettingsStore};
+use app::{paths, windows};
 use deploy::manifest::Manifest;
 use inference::supervisor::{Notice, Status, Supervisor};
 use state::AppState;
 use translate::scheduler::{TranslateEvent, TranslateRequest, Translator};
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct EffectInfo {
-    os_build: u32,
-    effect: &'static str,
-}
-
-/// Win11 (build >= 22000) -> Mica, Win10 -> Acrylic.
-fn pick_effect(build: u32) -> (Effect, &'static str) {
-    if build >= 22000 { (Effect::Mica, "Mica") } else { (Effect::Acrylic, "Acrylic") }
-}
-
-#[tauri::command]
-fn window_effect_info(state: State<EffectInfo>) -> EffectInfo {
-    state.inner().clone()
-}
+pub use app::windows::show_main;
 
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> Settings {
@@ -59,22 +45,6 @@ async fn translate(state: State<'_, AppState>, req: TranslateRequest, on_event: 
 #[tauri::command]
 fn translate_cancel(state: State<'_, AppState>) {
     state.translator.cancel();
-}
-
-#[tauri::command]
-fn open_logs_dir() {
-    let _ = std::process::Command::new("explorer").arg(app::paths::logs_dir()).spawn();
-}
-
-pub fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("wizard") {
-        let _ = w.hide();
-    }
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
 }
 
 fn build_state(app: &AppHandle) -> anyhow::Result<AppState> {
@@ -111,6 +81,35 @@ fn build_state(app: &AppHandle) -> anyhow::Result<AppState> {
     })
 }
 
+/// Forward supervisor status and settings changes to every window, and apply
+/// the side effects of a settings change (theme, idle release).
+fn spawn_forwarders(app: &AppHandle, state: &AppState) {
+    let handle = app.clone();
+    let mut rx = state.sup.subscribe();
+    tauri::async_runtime::spawn(async move {
+        while rx.changed().await.is_ok() {
+            let s = rx.borrow_and_update().clone();
+            let _ = handle.emit("inference-status", s);
+        }
+    });
+
+    let handle = app.clone();
+    let sup = state.sup.clone();
+    let mut rx = state.settings.subscribe();
+    let mut theme = state.settings.get().theme;
+    tauri::async_runtime::spawn(async move {
+        while rx.changed().await.is_ok() {
+            let s = rx.borrow_and_update().clone();
+            if s.theme != theme {
+                theme = s.theme;
+                windows::apply_theme(&handle, theme);
+            }
+            sup.set_idle_minutes(s.idle_release_minutes);
+            let _ = handle.emit("settings-changed", s);
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _log_guard = app::logging::init();
@@ -119,34 +118,29 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(app::hotkey::plugin())
+        .manage(Hotkeys::default())
         .setup(|app| {
-            let build = windows_version::OsVersion::current().build;
-            let (effect, name) = pick_effect(build);
-            let mut applied = "none";
-            for label in ["main", "wizard"] {
-                if let Some(win) = app.get_webview_window(label) {
-                    if win.set_effects(EffectsBuilder::new().effect(effect).build()).is_ok() {
-                        applied = name;
-                    }
-                }
-            }
-            app.manage(EffectInfo { os_build: build, effect: applied });
-
             let state = build_state(app.handle())?;
             let settings = state.settings.get();
             let spec = state.spec_from_settings(&settings);
             let sup = state.sup.clone();
+            spawn_forwarders(app.handle(), &state);
             app.manage(state);
+            app::hotkey::register_defaults(app.handle());
 
-            // Forward supervisor status changes to every window.
-            let handle = app.handle().clone();
-            let mut rx = sup.subscribe();
-            tauri::async_runtime::spawn(async move {
-                while rx.changed().await.is_ok() {
-                    let s = rx.borrow_and_update().clone();
-                    let _ = handle.emit("inference-status", s);
-                }
+            let build = windows_version::OsVersion::current().build;
+            app.manage(AppInfo {
+                version: env!("CARGO_PKG_VERSION"),
+                os_build: build,
+                effect: windows::pick_effect(build).1,
+                config_dir: paths::config_dir(),
+                logs_dir: paths::logs_dir(),
             });
+
+            // Windows last: their pages call commands that need the state above.
+            windows::create_all(app.handle(), build)?;
+            windows::apply_theme(app.handle(), settings.theme);
 
             match spec {
                 Some(spec) => {
@@ -169,9 +163,17 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let app = window.app_handle();
-                match window.label() {
+            let app = window.app_handle();
+            match event {
+                // The mini window behaves like a flyout: it hides on focus loss.
+                WindowEvent::Focused(false) if window.label() == "mini" => {
+                    let _ = window.hide();
+                }
+                WindowEvent::CloseRequested { api, .. } => match window.label() {
+                    "mini" => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                     // Re-deploy opened from the main window: just go back to it.
                     "wizard" if app.state::<AppState>().settings.get().deployed => {
                         api.prevent_close();
@@ -179,16 +181,24 @@ pub fn run() {
                     }
                     // No tray yet (M5): closing a top-level window quits.
                     _ => app.exit(0),
-                }
+                },
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
-            window_effect_info,
             get_settings,
             inference_status,
             translate,
             translate_cancel,
-            open_logs_dir,
+            app::commands::app_info,
+            app::commands::set_theme,
+            app::commands::set_idle_release,
+            app::commands::set_inference,
+            app::commands::hardware_info,
+            app::commands::open_logs_dir,
+            app::commands::open_models_dir,
+            app::commands::open_mini,
+            app::hotkey::hotkey_status,
             deploy::wizard::deploy_detect,
             deploy::wizard::deploy_models,
             deploy::wizard::disk_free_bytes,

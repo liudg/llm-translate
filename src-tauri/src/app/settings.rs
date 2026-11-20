@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 
 use super::paths;
 
@@ -12,6 +13,15 @@ use super::paths;
 pub enum Backend {
     Vulkan,
     Cpu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +38,7 @@ pub struct Settings {
     pub threads: u32,
     /// Release the model after this many idle minutes; 0 keeps it loaded.
     pub idle_release_minutes: u32,
+    pub theme: Theme,
 }
 
 impl Default for Settings {
@@ -41,6 +52,7 @@ impl Default for Settings {
             device: None,
             threads: 4,
             idle_release_minutes: 0,
+            theme: Theme::System,
         }
     }
 }
@@ -75,23 +87,37 @@ impl Settings {
     }
 }
 
-/// Shared settings handle; every mutation is written to disk.
+/// Shared settings handle; every mutation is written to disk and published to
+/// subscribers ([`SettingsStore::subscribe`]).
 #[derive(Clone)]
-pub struct SettingsStore(Arc<RwLock<Settings>>);
+pub struct SettingsStore {
+    inner: Arc<RwLock<Settings>>,
+    changed: Arc<watch::Sender<Settings>>,
+}
 
 impl SettingsStore {
     pub fn new(s: Settings) -> Self {
-        Self(Arc::new(RwLock::new(s)))
+        let changed = Arc::new(watch::channel(s.clone()).0);
+        Self { inner: Arc::new(RwLock::new(s)), changed }
     }
 
     pub fn get(&self) -> Settings {
-        self.0.read().unwrap().clone()
+        self.inner.read().unwrap().clone()
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<Settings> {
+        self.changed.subscribe()
     }
 
     pub fn update(&self, f: impl FnOnce(&mut Settings)) -> anyhow::Result<Settings> {
-        let mut guard = self.0.write().unwrap();
+        let mut guard = self.inner.write().unwrap();
         f(&mut guard);
-        guard.save()?;
-        Ok(guard.clone())
+        let saved = guard.save();
+        let snapshot = guard.clone();
+        drop(guard);
+        // Publish even when saving failed: the in-memory value did change.
+        self.changed.send_replace(snapshot.clone());
+        saved?;
+        Ok(snapshot)
     }
 }

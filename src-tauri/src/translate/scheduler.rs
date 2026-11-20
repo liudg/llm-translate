@@ -27,7 +27,9 @@ pub struct TranslateRequest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TranslateEvent {
-    Start { direction: Direction },
+    /// `mixed`: auto mode found paragraphs in both directions; `direction` is
+    /// then only the majority.
+    Start { direction: Direction, mixed: bool },
     Delta { text: String },
     #[serde(rename_all = "camelCase")]
     Done { elapsed_ms: u64 },
@@ -109,7 +111,6 @@ impl Translator {
         // Overall direction is only the label; in auto mode each paragraph is
         // detected on its own so mixed Chinese/English text works.
         let overall = req.direction.unwrap_or_else(|| detect(&req.text));
-        sink(TranslateEvent::Start { direction: overall });
 
         // Paragraph direction; None = no letters, copied through unchanged.
         let para_dir = |chunks: &[String]| {
@@ -117,6 +118,14 @@ impl Translator {
             detect_paragraph(&text).map(|d| req.direction.unwrap_or(d))
         };
         let pieces = segment(&req.text);
+        let mixed = pieces
+            .iter()
+            .filter_map(|p| match p {
+                Piece::Text(c) => para_dir(c),
+                Piece::Keep(_) => None,
+            })
+            .any(|d| d != overall);
+        sink(TranslateEvent::Start { direction: overall, mixed });
         let needs_model = pieces.iter().any(|p| matches!(p, Piece::Text(c) if para_dir(c).is_some()));
         if !needs_model {
             for p in pieces {
