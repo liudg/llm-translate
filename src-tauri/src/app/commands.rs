@@ -7,8 +7,9 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use super::paths;
-use super::settings::{Backend, Theme};
+use super::settings::{Backend, SelectionSettings, Theme};
 use crate::deploy::hardware::{self, HardwareInfo};
+use crate::selection::blacklist::{self, WindowProcess};
 use crate::state::AppState;
 
 #[derive(Serialize, Clone)]
@@ -98,4 +99,21 @@ pub fn open_models_dir(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn open_mini(app: AppHandle) {
     super::windows::show_mini(&app);
+}
+
+/// Replace the selection-translation settings; the hook picks them up through
+/// the settings forwarder.
+#[tauri::command]
+pub fn set_selection(state: State<'_, AppState>, selection: SelectionSettings) -> Result<(), String> {
+    state
+        .settings
+        .update(|s| s.selection = selection)
+        .map(|_| ())
+        .map_err(|e| format!("保存设置失败：{e}"))
+}
+
+/// Processes with a visible window, for the blacklist picker.
+#[tauri::command]
+pub async fn window_processes() -> Vec<WindowProcess> {
+    tauri::async_runtime::spawn_blocking(blacklist::window_processes).await.unwrap_or_default()
 }

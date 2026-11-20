@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow, Webvie
 use super::settings::Theme;
 
 /// Every window label in tauri.conf.json.
-const LABELS: [&str; 3] = ["main", "wizard", "mini"];
+const LABELS: [&str; 4] = ["main", "wizard", "mini", "popup"];
 
 /// Win11 (build >= 22000) -> Mica, Win10 -> Acrylic.
 pub fn pick_effect(build: u32) -> (Effect, &'static str) {

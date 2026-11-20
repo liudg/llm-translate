@@ -48,6 +48,20 @@
         "visible": false,
         "shadow": true,
         "create": false
+      },
+      {
+        "label": "popup",
+        "title": "LLM Translate · 划词翻译",
+        "width": 440,
+        "height": 120,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": true,
+        "create": false
       }
     ],
     "security": {

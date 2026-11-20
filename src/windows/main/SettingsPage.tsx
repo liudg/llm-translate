@@ -1,9 +1,19 @@
-// Settings (DESIGN 5.8). Live in M2: theme, model backend / threads / idle
-// release, about. Startup, shortcut recording, selection and model management
-// are placeholders until M3/M5.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { FolderOpen, RefreshCw } from "lucide-react";
-import { api, errorText, type AppInfo, type HardwareInfo, type HotkeyInfo, type ModelView, type Theme } from "../../lib/api";
+// Settings (DESIGN 5.8). Live: theme, selection translation (M3), model
+// backend / threads / idle release, about. Startup, shortcut recording and
+// model management are placeholders until M5.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, FolderOpen, Plus, RefreshCw, X } from "lucide-react";
+import {
+  api,
+  errorText,
+  type AppInfo,
+  type HardwareInfo,
+  type HotkeyInfo,
+  type ModelView,
+  type SelectionSettings,
+  type Theme,
+  type WindowProcess,
+} from "../../lib/api";
 import { mbToGb } from "../../lib/format";
 import { Badge, Button, Segmented, Select, Spinner, Toggle } from "../../components/ui";
 import { StatusChip } from "../../components/status";
@@ -191,6 +201,180 @@ function ModelGroup() {
   );
 }
 
+function SelectionGroup() {
+  const settings = useSettings((s) => s.settings);
+  const [manual, setManual] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  if (!settings) return null;
+  const sel = settings.selection;
+
+  const save = (patch: Partial<SelectionSettings>) => {
+    setError(null);
+    api.setSelection({ ...sel, ...patch }).catch((e) => setError(errorText(e)));
+  };
+  const has = (exe: string) => sel.blacklist.some((b) => b.toLowerCase() === exe.toLowerCase());
+  const add = (exe: string) => {
+    const name = exe.trim();
+    if (!name || has(name)) return;
+    save({ blacklist: [...sel.blacklist, name] });
+  };
+  const addManual = () => {
+    let name = manual.trim();
+    if (!name) return;
+    if (!/\.exe$/i.test(name)) name += ".exe";
+    add(name);
+    setManual("");
+  };
+  const off = !sel.enabled;
+  const triggers: { key: "drag" | "doubleClick" | "shiftClick"; title: string; desc: string }[] = [
+    { key: "drag", title: "拖动选择", desc: "按住左键拖过文字后松开" },
+    { key: "doubleClick", title: "双击选词", desc: "双击（三击选段落同样有效）" },
+    { key: "shiftClick", title: "Shift + 单击", desc: "按住 Shift 单击扩展选区" },
+  ];
+
+  return (
+    <Group title="划词翻译">
+      <Row title="划词翻译" desc="选中文字后在光标旁显示图标，点击图标才取词并翻译；不会发送 Ctrl+C，终端里也安全">
+        <Toggle checked={sel.enabled} onChange={(v) => save({ enabled: v })} />
+      </Row>
+      {triggers.map((t) => (
+        <Row key={t.key} title={t.title} desc={t.desc} muted={off}>
+          <Toggle checked={sel[t.key]} disabled={off} onChange={(v) => save({ [t.key]: v })} />
+        </Row>
+      ))}
+      <div
+        className={`flex flex-col gap-3 rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)] px-4 py-3 ${off ? "opacity-55" : ""}`}
+      >
+        <div>
+          <div className="text-sm">黑名单</div>
+          <div className="mt-0.5 text-xs opacity-65">在这些程序里选中文字时不显示图标（按进程名匹配）</div>
+        </div>
+        {sel.blacklist.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {sel.blacklist.map((b) => (
+              <span
+                key={b}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--stroke)] bg-[var(--surface)] pr-1 pl-2.5 text-xs"
+              >
+                {b}
+                <button
+                  title="移除"
+                  onClick={() => save({ blacklist: sel.blacklist.filter((x) => x !== b) })}
+                  className="inline-flex size-5 items-center justify-center rounded hover:bg-black/5 dark:hover:bg-white/10"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs opacity-50">暂无</div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <ProcessPicker disabled={off} isAdded={has} onPick={add} onError={setError} />
+          <input
+            value={manual}
+            disabled={off}
+            onChange={(e) => setManual(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addManual()}
+            placeholder="或输入进程名，如 notepad.exe"
+            spellCheck={false}
+            className="h-8 min-w-0 flex-1 rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)] px-2 text-sm outline-none focus:border-[var(--accent)]"
+          />
+          <Button icon={<Plus className="size-4" />} disabled={off || !manual.trim()} onClick={addManual}>
+            添加
+          </Button>
+        </div>
+        {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
+      </div>
+    </Group>
+  );
+}
+
+/** Button that lists processes with a visible window, fetched when opened. */
+function ProcessPicker({
+  disabled,
+  isAdded,
+  onPick,
+  onError,
+}: {
+  disabled: boolean;
+  isAdded: (exe: string) => boolean;
+  onPick: (exe: string) => void;
+  onError: (e: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [procs, setProcs] = useState<WindowProcess[] | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (open) return setOpen(false);
+    setProcs(null);
+    setOpen(true);
+    api
+      .windowProcesses()
+      .then(setProcs)
+      .catch((e) => {
+        setOpen(false);
+        onError(errorText(e));
+      });
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <Button disabled={disabled} onClick={toggle} className="w-56 justify-between">
+        <span>从正在运行的程序中选择</span>
+        <ChevronDown className="size-4 opacity-70" />
+      </Button>
+      {open && (
+        <div className="absolute top-full left-0 z-20 mt-1 max-h-72 w-96 overflow-y-auto rounded-lg border border-[var(--stroke)] bg-white p-1 shadow-lg dark:bg-[#2b2b2b]">
+          {procs === null && (
+            <div className="flex items-center gap-2 px-3 py-2 text-xs opacity-60">
+              <Spinner className="size-3.5" />
+              正在读取…
+            </div>
+          )}
+          {procs?.length === 0 && <div className="px-3 py-2 text-xs opacity-60">没有找到有窗口的程序</div>}
+          {procs?.map((p) => {
+            const added = isAdded(p.exe);
+            return (
+              <button
+                key={p.exe}
+                disabled={added}
+                onClick={() => {
+                  onPick(p.exe);
+                  setOpen(false);
+                }}
+                className="flex w-full flex-col items-start rounded-md px-3 py-1.5 text-left hover:bg-black/5 disabled:opacity-40 dark:hover:bg-white/10"
+              >
+                <span className="text-sm">
+                  {p.exe}
+                  {added && <span className="ml-2 text-xs opacity-70">已添加</span>}
+                </span>
+                <span className="w-full truncate text-xs opacity-60">{p.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo[]; visible: boolean }) {
   const settings = useSettings((s) => s.settings);
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -244,11 +428,7 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
           <Row title="自定义快捷键" desc={`录制快捷键与冲突检测${LATER}`} muted />
         </Group>
 
-        <Group title="划词翻译">
-          <Row title="划词翻译" desc={`选中文字后点击图标翻译；开关、黑名单与触发方式${LATER}`} muted>
-            <Toggle checked={false} disabled />
-          </Row>
-        </Group>
+        <SelectionGroup />
 
         {mounted && <ModelGroup />}
 

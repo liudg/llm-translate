@@ -35,7 +35,27 @@ anyhow = "1.0.104"
 dirs = "7.0.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
-windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Graphics_Dxgi", "Win32_Security"] }
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Console",
+  "Win32_System_DataExchange",
+  "Win32_System_JobObjects",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
 reqwest = { version = "0.13.5", default-features = false, features = ["stream", "json", "http2", "native-tls"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"

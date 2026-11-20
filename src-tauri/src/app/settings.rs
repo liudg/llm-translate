@@ -39,6 +39,27 @@ pub struct Settings {
     /// Release the model after this many idle minutes; 0 keeps it loaded.
     pub idle_release_minutes: u32,
     pub theme: Theme,
+    pub selection: SelectionSettings,
+}
+
+/// Selection translation (DESIGN 5.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SelectionSettings {
+    pub enabled: bool,
+    /// Trigger gestures.
+    pub drag: bool,
+    pub double_click: bool,
+    pub shift_click: bool,
+    /// Process names (`xxx.exe`) where the icon never shows; compared
+    /// case-insensitively.
+    pub blacklist: Vec<String>,
+}
+
+impl Default for SelectionSettings {
+    fn default() -> Self {
+        Self { enabled: true, drag: true, double_click: true, shift_click: true, blacklist: Vec::new() }
+    }
 }
 
 impl Default for Settings {
@@ -53,6 +74,7 @@ impl Default for Settings {
             threads: 4,
             idle_release_minutes: 0,
             theme: Theme::System,
+            selection: SelectionSettings::default(),
         }
     }
 }

@@ -1,6 +1,6 @@
 # LLM Translate 详细设计 v1
 
-> 状态：方案已与需求方确认（2026-11-20）；M0 技术验证已完成，结果见第 10 节；M1、M2 已完成。
+> 状态：方案已与需求方确认（2026-11-20）；M0 技术验证已完成，结果见第 10 节；M1、M2、M3 已完成。
 
 ## 1. 需求范围
 
@@ -95,7 +95,7 @@
                 │ HTTP 127.0.0.1:随机端口(SSE)  │ Tauri IPC / events
         ┌───────▼────────┐            ┌────────▼─────────────────────────┐
         │ llama-server   │            │ WebView 窗口（预创建、隐藏待命）     │
-        │ (cpu / vulkan) │            │ main · mini · sel-icon · popup     │
+        │ (cpu / vulkan) │            │ main · mini · popup（图标为原生窗口）│
         └────────────────┘            │ shot-overlay · shot-result · wizard│
                                       └──────────────────────────────────┘
 ```
@@ -111,12 +111,12 @@ llm-translate/
 │  │  ├─ deploy/     hardware.rs manifest.rs downloader.rs wizard.rs
 │  │  ├─ inference/  supervisor.rs client.rs
 │  │  ├─ translate/  detect.rs segment.rs prompt.rs scheduler.rs cache.rs
-│  │  ├─ selection/  hook.rs uia.rs clipboard.rs input.rs blacklist.rs
+│  │  ├─ selection/  hook.rs icon.rs uia.rs clipboard.rs input.rs blacklist.rs
 │  │  └─ capture/    dxgi.rs overlay.rs ocr.rs layout.rs
 │  ├─ resources/     llama/cpu/ llama/vulkan/ ocr/ models.json
 │  └─ tauri.conf.json
 ├─ src/              React 前端
-│  ├─ windows/       main mini sel-icon popup shot-overlay shot-result wizard
+│  ├─ windows/       main mini popup shot-overlay shot-result wizard
 │  ├─ components/  stores/  styles/  lib/
 └─ docs/DESIGN.md
 ```
@@ -189,30 +189,39 @@ llm-translate/
 
 ### 5.5 划词翻译（selection）
 
-**线程模型**
-- 钩子线程：`WH_MOUSE_LL`，回调只记录事件并投递到通道，不做任何阻塞操作（避免系统钩子超时被摘除）。
-- 工作线程：判定手势、驱动图标窗口、执行取词。
-- UIA 线程：MTA 初始化 COM，所有 UIA 调用带 200 ms 超时。
+**线程模型**（M3 实现）
+- 钩子线程：`WH_MOUSE_LL` 与图标窗同在一个带消息循环的线程。钩子回调只做原子变量运算并 `PostMessage` 给图标窗，手势判定在窗口过程里执行，回调不做任何阻塞操作（避免系统钩子超时被摘除）。键盘钩子 `WH_KEYBOARD_LL` 只在图标显示期间安装。划词总开关关闭时卸载鼠标钩子。
+- 取词线程：MTA 初始化 COM，执行 UIA → Ctrl+Insert；UIA 用 `IUIAutomation2` 把连接 / 事务超时设为 200 ms。
 
 **触发判定**（左键 down→up 期间）
-- 拖动距离 ≥ 8 px（按 DPI 缩放），或双击（系统双击时间内），或 Shift+单击。
-- 排除：前台为本应用窗口、黑名单进程、全屏独占应用。
-- 满足条件 → 在光标右下偏移处显示图标窗（`WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW`，不抢焦点、不进任务栏）。
-- 3 秒未点击、鼠标远离、键盘按下、滚轮 → 隐藏图标。
+- 拖动距离 ≥ 8 px（按 DPI 缩放），或双击（系统双击时间与范围内；三击同样触发），或 Shift+单击。三种方式在设置页各有开关。
+- 排除：前台为本应用窗口、黑名单进程、桌面与任务栏（`Progman` / `WorkerW` / `Shell_TrayWnd`）、全屏独占应用（`SHQueryUserNotificationState` 为 D3D 全屏或演示模式）；拖动期间按下处的顶层窗口位置 / 大小发生变化（在拖窗口或改窗口大小）也不弹。
+- 满足条件 → 在光标右下偏移处显示图标窗。
+- 3 秒未点击（鼠标停在图标上时不计时）、鼠标离开图标超过 120 px（按 DPI 缩放）、按下非修饰键、滚轮、右键 / 中键 → 隐藏图标。修饰键不算，否则 Shift+单击后按住 Shift 的自动重复会立刻关掉图标。
+
+**图标窗**（M3 实现）：原生 Win32 分层窗口而不是 WebView，`WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW`，并对 `WM_MOUSEACTIVATE` 返回 `MA_NOACTIVATE`。点击图标时焦点和选区都留在原应用，UIA 与 Ctrl+Insert 才能取到原应用的选区；同时因为本进程收到了这次点击，之后弹出浮窗时可以把它设为前台。图标为 24 DIP 强调色圆角方块 + 白色"译"字 + 白边与阴影，按显示器 DPI 软件绘制，悬停变亮。
 
 **取词（仅在点击图标时执行）**
 1. **UIA**：`GetFocusedElement` → 向上查找支持 `TextPattern` 的元素 → `GetSelection` → 拼接文本；按行去掉行尾填充空格（终端 UIA 会返回整行宽度的空格）。非空即成功。
 2. **Ctrl+Insert**（不产生 0x03 中断信号）：
    - 保存剪贴板：枚举格式，复制可复制的 HGLOBAL 数据（单格式 > 10 MB 跳过）。
    - 记录 `GetClipboardSequenceNumber`。
-   - `SendInput`：先释放用户当前按住的修饰键，再发 Ctrl↓ Insert↓(扩展键标志) Insert↑ Ctrl↑。
+   - `SendInput`：先等用户松开修饰键（最多 300 ms），仍按住的 Shift / Ctrl / Win 注入抬起；Alt 不注入抬起（单独的 Alt 抬起会激活很多应用的菜单栏），仍按住则放弃本次取词。然后发 Ctrl↓ Insert↓(扩展键标志) Insert↑ Ctrl↑。
    - 轮询序号最长 300 ms；变化则读 `CF_UNICODETEXT`。
+   - 剪贴板以图标窗（钩子线程，持续处理消息）为所有者打开，避免其他程序清空剪贴板时阻塞在发给我们的 `WM_DESTROYCLIPBOARD` 上。
    - 恢复原剪贴板，并给恢复操作附加 `ExcludeClipboardContentFromMonitorProcessing` 格式，避免原内容在 Win+V 历史里重复出现。已知限制：被复制的选中文本由目标应用写入，无法标记排除，会出现在 Win+V 历史中（仅 UIA 失败走此路径时）。
    - 剪贴板序号变化但内容为空（如 conhost 快速编辑模式单击后留下零宽选区）视为取词失败。
 3. **失败**：浮窗提示"该应用不支持划词，可使用截图翻译（Alt+W）"。
 4. **绝不发送 Ctrl+C**；因此无需识别终端类型。
 
-**译文浮窗**：出现在选区附近，流式显示译文；失焦自动关闭，可"钉住"；支持复制、重新翻译。
+**译文浮窗**：出现在选区附近，流式显示译文；失焦自动关闭，可"钉住"；支持复制、重新翻译。M3 实现（需求方确认，2026-11-20）：
+- 顶部一行显示原文（默认折叠成一行，点击展开全文）与方向按钮（点击循环"自动 → 中→英 → 英→中"并重译，每次新划词重置为自动）、钉住、关闭；中间流式译文；底栏方向 / 耗时、停止 / 重新翻译、复制译文。Esc 关闭。
+- 取词完成后才显示并设为前台（取词前抢焦点会让取词落到自己身上）；`SetForegroundWindow` 被拒时临时 `AttachThreadInput` 到前台线程再设置。
+- 位置：宽 440 逻辑像素，放在选区（手势按下 / 松开点的外接矩形，上下各留约一行）下方；下方放不下而上方空间更大时放在上方，此后高度变化保持底边不动。高度随内容变化，译文区最高 300 px 后滚动。
+- 钉住后失焦不关闭，新的划词结果显示在这个浮窗里且不移动位置；关闭即取消钉住。浮窗隐藏时停止正在进行的翻译。
+- 取词失败时只显示失败提示，不保留上一次的译文。
+
+**黑名单**（需求方确认，2026-11-20）：按进程名匹配，不区分大小写，默认为空。设置页可从"正在运行的程序"（有可见窗口的进程，带窗口标题，打开时才读取）中点选，也可手动输入进程名（省略 `.exe` 时自动补上）。
 
 ### 5.6 截图翻译（capture）
 
@@ -243,7 +252,8 @@ llm-translate/
   - 主题：跟随系统 / 浅色 / 深色，所有窗口同步；同时设置原生窗口主题（标题栏、Mica 色调）与页面 `data-theme`。
   - 模型：当前模型、状态、目录；推理后端（CPU / 检测到的各 Vulkan 设备）与 CPU 线程数，"应用并重新加载模型"后在后台重启推理进程；闲置释放（从不 / 5 / 10 / 30 / 60 分钟，立即生效）；"更换模型 / 重新部署"打开向导。显卡列表用 `llama-server --list-devices` 检测，不停止正在运行的模型，首次打开设置页时才检测。
   - 关于：版本、系统 build 与窗口效果、设置文件位置、打开日志目录。
-- M2 占位（标注"将在后续版本提供"）：开机自启、截图快捷键、划词开关快捷键、自定义快捷键（M5）；划词翻译各项（M3）；模型下载 / 切换 / 删除管理（M5）。
+- M3 可用：划词翻译总开关（默认开）、三种触发方式开关、黑名单。
+- 占位（标注"将在后续版本提供"）：开机自启、截图快捷键、划词开关快捷键、自定义快捷键（M5）；模型下载 / 切换 / 删除管理（M5）。
 - 每次设置变更都广播 `settings-changed` 事件，各窗口据此同步（含 GPU 失败自动退回 CPU 的变更）。
 
 ## 6. 安装包
@@ -293,6 +303,12 @@ llm-translate/
 - M2 验收（2026-11-20，Win11 build 26200）：中英互译流式输出、自动 / 锁定方向、中英混合逐段翻译、设置页切换 GPU↔CPU 并重载、闲置释放设置、浅色 / 深色 / 跟随系统、迷你窗随内容增高 / Esc 关闭 / 失焦隐藏 / 再次呼出全选上次原文，均已在真实应用中验证。Win10 无测试环境，界面与 Acrylic 效果的验证并入 M6。
 
 **划词测试矩阵**：Windows Terminal（cmd / PowerShell / WSL）、传统 conhost、Git Bash（mintty）、VS Code 集成终端、Xshell、MobaXterm、PuTTY、Chrome、Edge、Word、WPS、微信、记事本、资源管理器。
+
+- M3 验收范围（需求方确认，2026-11-20）：终端只用 Windows 自带终端验证，即 conhost 与 Windows Terminal（cmd / PowerShell）。其余终端与应用不在 M3 验收内。
+- M3 验收（2026-11-20，Win11 build 26200，`src-tauri/examples/m3_check.rs`）：
+  - `capture` 模式：conhost、Windows Terminal（cmd）、Windows Terminal（PowerShell）中各自运行 `ping -t`。无选区时 Ctrl+Insert、拖选后 UIA 取词、拖选后仅用 Ctrl+Insert 取词，ping 均存活；Ctrl+Insert 后用户剪贴板原样恢复。对照组真实 Ctrl+C 会终止 ping，证明测试有效。
+  - `e2e` 模式（应用以 `LLMT_ACCEPT_INJECTED=1` 调试运行，钩子才接受注入的鼠标事件）：同样三个终端中拖选后图标出现，点击图标后浮窗显示并成为前台窗口，ping 均存活；日志显示取词走 UIA，耗时 6–27 ms。
+  - 真实应用中另外验证了：记事本划词，从点图标到 9B GPU 出完整译文 0.86 s；空文件夹的资源管理器里取词失败时显示提示；黑名单加入 notepad.exe 后记事本不再弹图标，移除后恢复；总开关关闭 / 打开会卸载 / 重装钩子；设置页的程序选择器正常。
 
 ## 10. M0 技术验证结果（2026-11-20）
 

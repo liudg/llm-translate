@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "wizard",
-    "mini"
+    "mini",
+    "popup"
   ],
   "permissions": [
     "core:default",

@@ -1,6 +1,7 @@
 pub mod app;
 pub mod deploy;
 pub mod inference;
+pub mod selection;
 pub mod state;
 pub mod translate;
 
@@ -12,10 +13,12 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 use app::commands::AppInfo;
 use app::hotkey::Hotkeys;
+use app::popup::{self, PopupState};
 use app::settings::{Backend, Settings, SettingsStore};
 use app::{paths, windows};
 use deploy::manifest::Manifest;
 use inference::supervisor::{Notice, Status, Supervisor};
+use selection::Selection;
 use state::AppState;
 use translate::scheduler::{TranslateEvent, TranslateRequest, Translator};
 
@@ -82,8 +85,8 @@ fn build_state(app: &AppHandle) -> anyhow::Result<AppState> {
 }
 
 /// Forward supervisor status and settings changes to every window, and apply
-/// the side effects of a settings change (theme, idle release).
-fn spawn_forwarders(app: &AppHandle, state: &AppState) {
+/// the side effects of a settings change (theme, idle release, selection).
+fn spawn_forwarders(app: &AppHandle, state: &AppState, selection: Option<Arc<Selection>>) {
     let handle = app.clone();
     let mut rx = state.sup.subscribe();
     tauri::async_runtime::spawn(async move {
@@ -97,12 +100,19 @@ fn spawn_forwarders(app: &AppHandle, state: &AppState) {
     let sup = state.sup.clone();
     let mut rx = state.settings.subscribe();
     let mut theme = state.settings.get().theme;
+    let mut sel = state.settings.get().selection;
     tauri::async_runtime::spawn(async move {
         while rx.changed().await.is_ok() {
             let s = rx.borrow_and_update().clone();
             if s.theme != theme {
                 theme = s.theme;
                 windows::apply_theme(&handle, theme);
+            }
+            if s.selection != sel {
+                sel = s.selection.clone();
+                if let Some(selection) = &selection {
+                    selection.set_config(&sel);
+                }
             }
             sup.set_idle_minutes(s.idle_release_minutes);
             let _ = handle.emit("settings-changed", s);
@@ -120,12 +130,18 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(app::hotkey::plugin())
         .manage(Hotkeys::default())
+        .manage(PopupState::default())
         .setup(|app| {
             let state = build_state(app.handle())?;
             let settings = state.settings.get();
             let spec = state.spec_from_settings(&settings);
             let sup = state.sup.clone();
-            spawn_forwarders(app.handle(), &state);
+            let handle = app.handle().clone();
+            let selection = Selection::start(&settings.selection, move |cap| popup::show_capture(&handle, cap))
+                .map(Arc::new)
+                .map_err(|e| tracing::error!("selection translation unavailable: {e}"))
+                .ok();
+            spawn_forwarders(app.handle(), &state, selection);
             app.manage(state);
             app::hotkey::register_defaults(app.handle());
 
@@ -169,10 +185,20 @@ pub fn run() {
                 WindowEvent::Focused(false) if window.label() == "mini" => {
                     let _ = window.hide();
                 }
+                // The selection popup closes on focus loss unless pinned.
+                WindowEvent::Focused(false)
+                    if window.label() == popup::LABEL && !app.state::<PopupState>().pinned() =>
+                {
+                    popup::hide(app);
+                }
                 WindowEvent::CloseRequested { api, .. } => match window.label() {
                     "mini" => {
                         api.prevent_close();
                         let _ = window.hide();
+                    }
+                    popup::LABEL => {
+                        api.prevent_close();
+                        popup::hide(app);
                     }
                     // Re-deploy opened from the main window: just go back to it.
                     "wizard" if app.state::<AppState>().settings.get().deployed => {
@@ -198,6 +224,12 @@ pub fn run() {
             app::commands::open_logs_dir,
             app::commands::open_models_dir,
             app::commands::open_mini,
+            app::commands::set_selection,
+            app::commands::window_processes,
+            app::popup::popup_set_height,
+            app::popup::popup_set_pinned,
+            app::popup::popup_close,
+            app::popup::popup_current,
             app::hotkey::hotkey_status,
             deploy::wizard::deploy_detect,
             deploy::wizard::deploy_models,

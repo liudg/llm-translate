@@ -15,6 +15,28 @@ export interface Settings {
   threads: number;
   idleReleaseMinutes: number;
   theme: Theme;
+  selection: SelectionSettings;
+}
+
+export interface SelectionSettings {
+  enabled: boolean;
+  drag: boolean;
+  doubleClick: boolean;
+  shiftClick: boolean;
+  /** Process names such as `WINWORD.EXE`. */
+  blacklist: string[];
+}
+
+export interface WindowProcess {
+  exe: string;
+  title: string;
+}
+
+/** One click on the selection icon. `text` is null when capture failed. */
+export interface SelectionPayload {
+  id: number;
+  text: string | null;
+  error: string | null;
 }
 
 export interface AppInfo {
@@ -145,6 +167,12 @@ export const api = {
   setIdleRelease: (minutes: number) => invoke<void>("set_idle_release", { minutes }),
   setInference: (backend: Backend, device: string | null, threads: number) =>
     invoke<void>("set_inference", { backend, device, threads }),
+  setSelection: (selection: SelectionSettings) => invoke<void>("set_selection", { selection }),
+  windowProcesses: () => invoke<WindowProcess[]>("window_processes"),
+  popupSetHeight: (height: number) => invoke<void>("popup_set_height", { height }),
+  popupSetPinned: (pinned: boolean) => invoke<void>("popup_set_pinned", { pinned }),
+  popupClose: () => invoke<void>("popup_close"),
+  popupCurrent: () => invoke<SelectionPayload | null>("popup_current"),
   cancelTranslate: () => invoke<void>("translate_cancel"),
   translate: (text: string, direction: Direction | null, onEvent: (e: TranslateEvent) => void) => {
     const ch = new Channel<TranslateEvent>();
@@ -160,6 +188,9 @@ export const events = {
   status: (cb: (s: InferenceStatus) => void) => listen<InferenceStatus>("inference-status", (e) => cb(e.payload)),
   notice: (cb: (n: InferenceNotice) => void) => listen<InferenceNotice>("inference-notice", (e) => cb(e.payload)),
   settings: (cb: (s: Settings) => void) => listen<Settings>("settings-changed", (e) => cb(e.payload)),
+  selection: (cb: (p: SelectionPayload) => void) =>
+    listen<SelectionPayload>("selection-captured", (e) => cb(e.payload)),
+  popupHidden: (cb: () => void) => listen("popup-hidden", () => cb()),
 };
 
 /** Tauri rejects with the serialized error value; normalize to text. */
