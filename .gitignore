@@ -32,6 +32,7 @@ src-tauri/target/
 __pycache__/
 *.pyc
 
-# llama.cpp binaries and OCR models (scripts/fetch-llama.ps1, scripts/fetch-ocr.ps1)
+# llama.cpp binaries, OCR models and runtime DLLs (scripts/fetch-*.ps1, prepare-runtime.ps1)
 src-tauri/resources/llama/
 src-tauri/resources/ocr/
+src-tauri/resources/runtime/

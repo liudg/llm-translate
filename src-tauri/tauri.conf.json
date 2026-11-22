@@ -84,7 +84,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "LLM Translate",
+    "shortDescription": "本地大模型中英互译",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -95,7 +97,22 @@
     "resources": {
       "resources/llama/*": "llama/",
       "resources/ocr/*": "ocr/",
-      "resources/models.json": "models.json"
+      "resources/models.json": "models.json",
+      "resources/runtime/*": "./"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese"],
+        "compression": "lzma",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installerHooks": "nsis/hooks.nsh"
+      }
     }
   }
 }

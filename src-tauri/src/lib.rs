@@ -158,6 +158,7 @@ fn tray_hint_once(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let started = std::time::Instant::now();
     let _log_guard = app::logging::init();
     tracing::info!("LLM Translate {} starting", env!("CARGO_PKG_VERSION"));
 
@@ -173,9 +174,12 @@ pub fn run() {
         .plugin(app::hotkey::plugin())
         .manage(Hotkeys::default())
         .manage(PopupState::default())
-        .setup(|app| {
+        .setup(move |app| {
             let state = build_state(app.handle())?;
             let settings = state.settings.get();
+            if settings.deployed || settings.models_dir.exists() {
+                app::settings::sync_models_dir_registry(&settings.models_dir);
+            }
             let spec = state.spec_from_settings(&settings);
             let sup = state.sup.clone();
             let handle = app.handle().clone();
@@ -199,12 +203,11 @@ pub fn run() {
             });
 
             // Windows last: their pages call commands that need the state above.
-            windows::create_all(app.handle(), build)?;
-            windows::restore_main_placement(app.handle());
-            windows::apply_theme(app.handle(), settings.theme);
+            windows::create_startup(app.handle(), build, spec.is_some())?;
 
             // Started with Windows: stay in the tray.
             let minimized = std::env::args().any(|a| a == app::autostart::ARG);
+            tracing::info!("startup ready in {} ms (minimized={minimized})", started.elapsed().as_millis());
             match spec {
                 Some(spec) => {
                     tracing::info!("deployed model {}; preloading{}", spec.model_id, if minimized { " (tray only)" } else { "" });
@@ -220,7 +223,7 @@ pub fn run() {
                 }
                 None => {
                     tracing::info!("not deployed; opening wizard");
-                    if let Some(w) = app.get_webview_window("wizard") {
+                    if let Ok(w) = windows::ensure_window(app.handle(), "wizard") {
                         w.show()?;
                     }
                 }
@@ -263,7 +266,7 @@ pub fn run() {
                         let _ = window.hide();
                         tray_hint_once(app);
                     }
-                    // Re-deploy opened from the main window: just go back to it.
+                    // Re-deploy opened from the main window: close wizard to free its WebView and return to main.
                     "wizard" if app.state::<AppState>().settings.get().deployed => {
                         api.prevent_close();
                         show_main(app);

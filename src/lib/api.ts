@@ -51,7 +51,7 @@ export interface SelectionPayload {
 export interface AppInfo {
   version: string;
   osBuild: number;
-  effect: "Mica" | "Acrylic";
+  effect: string;
   configDir: string;
   logsDir: string;
 }

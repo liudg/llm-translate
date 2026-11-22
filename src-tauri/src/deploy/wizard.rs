@@ -298,9 +298,13 @@ pub fn deploy_finish(app: AppHandle, autostart: Option<bool>) {
 
 #[tauri::command]
 pub fn open_wizard(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("wizard") {
-        let _ = w.emit("wizard-reset", ());
+    let existed = app.get_webview_window("wizard").is_some();
+    if let Ok(w) = crate::app::windows::ensure_window(&app, "wizard") {
+        if existed {
+            let _ = w.emit("wizard-reset", ());
+        }
         let _ = w.show();
+        let _ = w.unminimize();
         let _ = w.set_focus();
     }
 }

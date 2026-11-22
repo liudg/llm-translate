@@ -17,7 +17,7 @@ use crate::state::AppState;
 pub struct AppInfo {
     pub version: &'static str,
     pub os_build: u32,
-    /// Backdrop requested for this OS build: `Mica` or `Acrylic`.
+    /// Backdrop requested for this OS build: `Mica` (Win11) or `纯色` (Win10).
     pub effect: &'static str,
     pub config_dir: PathBuf,
     pub logs_dir: PathBuf,

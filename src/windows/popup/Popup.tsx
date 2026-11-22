@@ -86,7 +86,7 @@ export default function Popup() {
   const dirText = directionText(state);
 
   return (
-    <div ref={rootRef} className="flex flex-col text-sm">
+    <div ref={rootRef} className="flyout-frame flex flex-col text-sm">
       <div data-tauri-drag-region className="flex h-11 items-center gap-1.5 pr-1.5 pl-3">
         <Languages className="pointer-events-none size-4 shrink-0 text-[var(--accent-text)]" />
         {source ? (

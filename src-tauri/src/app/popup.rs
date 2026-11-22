@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 
 use crate::selection::{Capture, ScreenRect};
+use crate::state::AppState;
 
 pub const LABEL: &str = "popup";
 /// Logical width; the page reports its height.
@@ -15,7 +16,13 @@ const WIDTH: f64 = 440.0;
 /// Room the popup may need below the selection before it opens above instead.
 const MAX_HEIGHT: f64 = 420.0;
 const INITIAL_HEIGHT: f64 = 120.0;
-const UNSUPPORTED: &str = "该应用不支持划词，可使用截图翻译（Alt+W）";
+
+fn unsupported_hint(app: &AppHandle) -> String {
+    match app.state::<AppState>().settings.get().hotkeys.shot {
+        Some(keys) if !keys.is_empty() => format!("该应用不支持划词，可使用截图翻译（{keys}）"),
+        _ => "该应用不支持划词，可使用截图翻译".to_string(),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,7 +92,7 @@ fn focus(win: &WebviewWindow) {
 
 /// Show a capture result (called on the capture thread).
 pub fn show_capture(app: &AppHandle, cap: Capture) {
-    let Some(win) = app.get_webview_window(LABEL) else { return };
+    let Ok(win) = crate::app::windows::ensure_window(app, LABEL) else { return };
     let state = app.state::<PopupState>();
     let visible = win.is_visible().unwrap_or(false);
     let payload = {
@@ -93,7 +100,7 @@ pub fn show_capture(app: &AppHandle, cap: Capture) {
         inner.seq += 1;
         let payload = SelectionPayload {
             id: inner.seq,
-            error: cap.text.is_none().then(|| UNSUPPORTED.to_string()),
+            error: cap.text.is_none().then(|| unsupported_hint(app)),
             text: cap.text,
         };
         inner.last = Some(payload.clone());

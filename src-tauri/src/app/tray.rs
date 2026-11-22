@@ -115,7 +115,7 @@ fn deployed(app: &AppHandle) -> bool {
 pub fn open_primary(app: &AppHandle) {
     if deployed(app) {
         windows::show_main(app);
-    } else if let Some(w) = app.get_webview_window("wizard") {
+    } else if let Ok(w) = windows::ensure_window(app, "wizard") {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();

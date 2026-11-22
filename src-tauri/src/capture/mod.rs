@@ -144,6 +144,15 @@ fn session(app: &AppHandle, state: &CaptureState, minimize_main: bool) {
             return;
         }
     };
+    // Warm up the result WebView while the user drags their selection.
+    if app.get_webview_window(LABEL).is_none() {
+        let warm_app = app.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = crate::app::windows::ensure_window(&warm_app, LABEL) {
+                tracing::error!("creating screenshot result window failed: {e}");
+            }
+        });
+    }
     let Some(sel) = overlay.wait() else {
         tracing::info!("screenshot cancelled");
         return;
@@ -171,7 +180,7 @@ fn session(app: &AppHandle, state: &CaptureState, minimize_main: bool) {
         let _ = tx.send(Some(result));
     });
 
-    let Some(win) = app.get_webview_window(LABEL) else { return };
+    let Ok(win) = crate::app::windows::ensure_window(app, LABEL) else { return };
     place(&win, window);
     *state.overlay.lock().unwrap() = Some((id, overlay));
     let _ = app.emit_to(LABEL, "shot-new", payload);

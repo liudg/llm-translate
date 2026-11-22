@@ -106,12 +106,10 @@ export default function Wizard() {
   }, [runDetect]);
 
   useEffect(() => {
-    // The window is pre-created hidden; when already deployed it only detects
-    // once opened again (wizard-reset).
-    api.getSettings().then((s) => {
-      setWasDeployed(s.deployed);
-      if (!s.deployed) runDetect();
-    });
+    // The wizard window is created on demand (first run or re-deploy), so
+    // detect right away on mount and also handle `wizard-reset` if already open.
+    api.getSettings().then((s) => setWasDeployed(s.deployed));
+    runDetect();
     const un = listen("wizard-reset", reset);
     return () => {
       un.then((f) => f());

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::window::{Effect, EffectsBuilder};
+use tauri::window::{Color, Effect, EffectsBuilder};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow, WebviewWindowBuilder};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromRect};
@@ -18,57 +18,145 @@ use super::settings::Theme;
 
 /// Every window label in tauri.conf.json.
 const LABELS: [&str; 5] = ["main", "wizard", "mini", "popup", "shot"];
+/// Windows that use the OS backdrop (Mica on Win11) or Fluent solid colour (Win10).
+const BACKDROP_LABELS: [&str; 4] = ["main", "wizard", "mini", "popup"];
 
-/// Win11 (build >= 22000) -> Mica, Win10 -> Acrylic.
-pub fn pick_effect(build: u32) -> (Effect, &'static str) {
-    if build >= 22000 { (Effect::Mica, "Mica") } else { (Effect::Acrylic, "Acrylic") }
+/// OS build cached at startup so lazy-created windows pick the same backdrop.
+static OS_BUILD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// True on Windows 10 (build < 22000), where Mica is unavailable and Win10
+/// Acrylic causes severe drag/resize lag, so windows use a solid Fluent fill.
+static USE_SOLID: AtomicBool = AtomicBool::new(false);
+
+/// Fluent solid backing colours for Win10 (must match `src/index.css`).
+const SOLID_LIGHT: Color = Color(0xf3, 0xf3, 0xf3, 0xff);
+const SOLID_DARK: Color = Color(0x20, 0x20, 0x20, 0xff);
+
+/// Win11 (build >= 22000) -> Mica; Win10 (build < 22000) -> solid Fluent fill
+/// to avoid Win10 Acrylic drag/resize lag (DESIGN 2 / 8).
+pub fn pick_effect(build: u32) -> (Option<Effect>, &'static str) {
+    if build >= 22000 { (Some(Effect::Mica), "Mica") } else { (None, "纯色") }
 }
 
-/// Create the windows from tauri.conf.json (all `"create": false`) with the
-/// backdrop for this OS build; Called at the end of
-/// setup so no page can invoke a command before its state is managed.
-pub fn create_all(app: &AppHandle, build: u32) -> tauri::Result<()> {
+/// Whether Windows is currently set to dark app mode (Win10 1607+ / Win11).
+fn system_uses_dark_mode() -> bool {
+    windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_u32("AppsUseLightTheme"))
+        .is_ok_and(|v| v == 0)
+}
+
+fn solid_color(theme: Theme) -> Color {
+    let dark = match theme {
+        Theme::Dark => true,
+        Theme::Light => false,
+        Theme::System => system_uses_dark_mode(),
+    };
+    if dark { SOLID_DARK } else { SOLID_LIGHT }
+}
+
+fn tauri_theme(theme: Theme) -> Option<tauri::Theme> {
+    match theme {
+        Theme::System => None,
+        Theme::Light => Some(tauri::Theme::Light),
+        Theme::Dark => Some(tauri::Theme::Dark),
+    }
+}
+
+/// Return an existing window or create it from `tauri.conf.json` with the
+/// backdrop and theme for this OS build.
+pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
+    if let Some(win) = app.get_webview_window(label) {
+        return Ok(win);
+    }
+    let cfg = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == label)
+        .ok_or_else(|| tauri::Error::WebviewNotFound)?;
+    let theme = app.state::<crate::state::AppState>().settings.get().theme;
+    let (effect, _) = pick_effect(OS_BUILD.load(Ordering::Relaxed));
+    let builder = WebviewWindowBuilder::from_config(app, cfg)?;
+    // The screenshot result window must show the image exactly, with
+    // see-through margins: no backdrop.
+    let builder = if cfg.label == crate::capture::LABEL {
+        builder
+    } else if let Some(eff) = effect {
+        builder.effects(EffectsBuilder::new().effect(eff).build())
+    } else {
+        // Win10 solid fallback: disable transparency for crisp shadows and
+        // fast composition, set the WebView2 backing colour, and flag the
+        // DOM before first paint so index.css paints the matching solid fill.
+        builder
+            .transparent(false)
+            .background_color(solid_color(theme))
+            .initialization_script("document.documentElement.dataset.effect='solid';")
+    };
+    let win = builder.build()?;
+    let _ = win.set_theme(tauri_theme(theme));
+    if label == "main" {
+        restore_main_placement(app);
+    }
+    Ok(win)
+}
+
+/// Create only the windows needed at startup (all `"create": false` in
+/// tauri.conf.json). Deployed runs pre-create `main`, `mini`, `popup` so input
+/// and selection stay instant while skipping the unused `wizard` and `shot`
+/// WebViews (saving ~130 MB WebView2 RAM and ~200 ms startup). First-run
+/// startup only creates `wizard`.
+pub fn create_startup(app: &AppHandle, build: u32, deployed: bool) -> tauri::Result<()> {
+    OS_BUILD.store(build, Ordering::Relaxed);
     let (effect, _) = pick_effect(build);
-    for cfg in &app.config().app.windows {
-        let builder = WebviewWindowBuilder::from_config(app, cfg)?;
-        // The screenshot result window must show the image exactly, with
-        // see-through margins: no backdrop.
-        let builder = if cfg.label == crate::capture::LABEL {
-            builder
-        } else {
-            builder.effects(EffectsBuilder::new().effect(effect).build())
-        };
-        builder.build()?;
+    USE_SOLID.store(effect.is_none(), Ordering::Relaxed);
+    let initial: &[&str] = if deployed { &["main", "mini", "popup"] } else { &["wizard"] };
+    for label in initial {
+        ensure_window(app, label)?;
     }
     Ok(())
 }
 
-/// Native window theme (title bar, Mica tint). The page itself follows the
-/// `settings-changed` event, see `src/lib/theme.ts`.
+/// Native window theme (title bar, Mica tint, and Win10 solid backing colour).
+/// The page itself follows the `settings-changed` event, see `src/lib/theme.ts`.
 pub fn apply_theme(app: &AppHandle, theme: Theme) {
-    let t = match theme {
-        Theme::System => None,
-        Theme::Light => Some(tauri::Theme::Light),
-        Theme::Dark => Some(tauri::Theme::Dark),
-    };
+    let t = tauri_theme(theme);
+    let solid = USE_SOLID.load(Ordering::Relaxed).then(|| solid_color(theme));
     for label in LABELS {
         if let Some(win) = app.get_webview_window(label) {
             let _ = win.set_theme(t);
+            if let Some(bg) = solid
+                && BACKDROP_LABELS.contains(&label)
+            {
+                let _ = win.set_background_color(Some(bg));
+            }
         }
     }
 }
 
 pub fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("wizard") {
-        let _ = w.hide();
-    }
-    if let Some(w) = app.get_webview_window("main") {
+    if let Ok(w) = ensure_window(app, "main") {
         let _ = w.show();
         let _ = w.unminimize();
         if RESTORE_MAXIMIZED.swap(false, Ordering::Relaxed) {
             let _ = w.maximize();
         }
         let _ = w.set_focus();
+    }
+    // Pre-warm mini & popup after the first deployment finishes.
+    let _ = ensure_window(app, "mini");
+    let _ = ensure_window(app, "popup");
+    // Hide the wizard immediately and destroy it asynchronously (outside its
+    // own IPC / CloseRequested handler) so its WebView2 renderer is freed.
+    if let Some(w) = app.get_webview_window("wizard") {
+        let _ = w.hide();
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if let Some(w) = app.get_webview_window("wizard") {
+                let _ = w.destroy();
+            }
+        });
     }
 }
 
@@ -176,7 +264,7 @@ fn place_mini(win: &WebviewWindow) {
 }
 
 pub fn show_mini(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("mini") else { return };
+    let Ok(win) = ensure_window(app, "mini") else { return };
     place_mini(&win);
     let _ = win.show();
     let _ = win.set_focus();
@@ -185,10 +273,26 @@ pub fn show_mini(app: &AppHandle) {
 }
 
 pub fn toggle_mini(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("mini") else { return };
-    if win.is_visible().unwrap_or(false) && win.is_focused().unwrap_or(false) {
+    if let Some(win) = app.get_webview_window("mini")
+        && win.is_visible().unwrap_or(false)
+        && win.is_focused().unwrap_or(false)
+    {
         let _ = win.hide();
     } else {
         show_mini(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn win10_uses_solid_and_win11_uses_mica() {
+        assert_eq!(pick_effect(17763), (None, "纯色")); // Win10 1809
+        assert_eq!(pick_effect(19045), (None, "纯色")); // Win10 22H2
+        assert_eq!(pick_effect(21999), (None, "纯色"));
+        assert_eq!(pick_effect(22000), (Some(Effect::Mica), "Mica")); // Win11 21H2
+        assert_eq!(pick_effect(26200), (Some(Effect::Mica), "Mica")); // Win11 24H2+
     }
 }

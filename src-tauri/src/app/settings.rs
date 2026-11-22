@@ -126,7 +126,20 @@ impl Settings {
             let _ = std::fs::remove_file(&tmp);
             std::fs::write(&path, &data)?;
         }
+        sync_models_dir_registry(&self.models_dir);
         Ok(())
+    }
+}
+
+/// Mirror `models_dir` to `HKCU\Software\LLMTranslate\ModelsDir` (native UTF-16)
+/// so the NSIS uninstaller can locate downloaded models reliably even when the
+/// user chose a custom or non-ASCII directory.
+pub fn sync_models_dir_registry(dir: &std::path::Path) {
+    let r = windows_registry::CURRENT_USER
+        .create(r"Software\LLMTranslate")
+        .and_then(|k| k.set_string("ModelsDir", &dir.to_string_lossy()));
+    if let Err(e) = r {
+        tracing::warn!("mirroring modelsDir to registry failed: {e}");
     }
 }
 

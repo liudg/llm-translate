@@ -74,7 +74,7 @@ export default function Mini() {
   const dirText = directionText(state);
 
   return (
-    <div ref={rootRef} className="flex flex-col">
+    <div ref={rootRef} className="flyout-frame flex flex-col">
       <div className="flex items-start gap-2 px-3 py-3">
         <div data-tauri-drag-region className="flex h-[38px] w-7 shrink-0 cursor-move items-center justify-center">
           <Languages className="pointer-events-none size-5 text-[var(--accent-text)]" />

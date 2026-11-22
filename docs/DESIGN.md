@@ -1,6 +1,6 @@
 # LLM Translate 详细设计 v1
 
-> 状态：方案已与需求方确认（2026-11-20）；M0 技术验证已完成，结果见第 10 节；M1、M2、M3、M4、M5 已完成。
+> 状态：方案已与需求方确认（2026-11-20）；M0 技术验证已完成，结果见第 10 节；M1、M2、M3、M4、M5、M6 已完成。
 
 ## 1. 需求范围
 
@@ -23,7 +23,7 @@
 |---|---|
 | 应用框架 | Tauri 2（Rust stable） |
 | 前端 | React 18 + TypeScript + Vite + Tailwind CSS + zustand；lucide 图标 |
-| 视觉 | Fluent 风格；Win11 Mica / Win10 Acrylic（拖动卡顿则降级为纯色）；深浅色跟随系统 |
+| 视觉 | Fluent 风格；Win11 Mica / Win10 降级为 Fluent 纯色（浅 `#f3f3f3` / 深 `#202020`，避免 Win10 Acrylic 拖动卡顿）；深浅色跟随系统 |
 | Win32 / UIA / DXGI | `windows` crate (windows-rs) |
 | 推理 | llama.cpp 官方 release 的 `llama-server`，作为子进程（sidecar） |
 | OCR | PP-OCRv6 Small（det + rec）ONNX，经 `oar-ocr` 0.11（内部 `ort`，ONNX Runtime 静态链接）；模型约 30 MB 随安装包 |
@@ -246,7 +246,7 @@ M4 实现（需求方确认，2026-11-20：结果窗只保留一个；只支持�
 M5 实现（需求方确认，2026-11-20：关闭主窗口隐藏到托盘并首次提示；划词开关快捷键只用托盘图标变灰反馈；自启在向导完成页勾选、首次部署默认勾上；录制的快捷键被占用时不保存、保留原快捷键；记住主窗口大小位置）。
 
 - **托盘**：菜单为 输入翻译 / 截图翻译（右侧显示当前生效的快捷键，Win32 菜单文字里的 Tab 右对齐）/ 划词翻译（勾选项）/ 设置 / 退出。左键单击打开主窗口；"设置"打开主窗口并切到设置页（`navigate` 事件）。未部署时这些入口改为打开部署向导。划词翻译关闭时托盘图标换成灰色半透明版本（运行时由应用图标去色生成），提示文字加"（划词翻译已关闭）"；托盘、设置页、快捷键三处切换共用同一个设置项，互相同步。
-- **关闭主窗口**：隐藏到托盘，不退出；第一次关闭时发一条 Windows 通知"LLM Translate 仍在运行……可在托盘图标的菜单中退出"，之后不再提示（`trayHintShown`）。只能从托盘"退出"。部署完成前关闭向导仍直接退出。开发构建里通知来源显示为 Windows PowerShell（未注册 AppUserModelID），安装版需在 M6 确认。
+- **关闭主窗口**：隐藏到托盘，不退出；第一次关闭时发一条 Windows 通知"LLM Translate 仍在运行……可在托盘图标的菜单中退出"，之后不再提示（`trayHintShown`）。只能从托盘"退出"。部署完成前关闭向导仍直接退出。M6 已确认：NSIS 安装版在开始菜单快捷方式写入 `System.AppUserModel.ID = com.llmtranslate.app`，`tauri-plugin-notification` 识别非 `target/` 目录后自动附带该 `app_id`。
 - **主窗口位置**：`GetWindowPlacement` 的正常矩形（工作区坐标）与是否最大化存入 `window.json`；隐藏前、退出前以及移动 / 改变大小停止 0.8 秒后保存。启动时窗口仍隐藏，用 `SetWindowPlacement(SW_HIDE)` 套用矩形，首次显示时再按需最大化；矩形不在任何现有显示器上（`MonitorFromRect` 为空）则忽略，保持居中。
 - **单实例**：tauri-plugin-single-instance（第一个注册的插件）；再次启动时新进程退出，已有实例显示主窗口（未部署时显示向导）。
 - **开机自启**：`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 值 `LLM Translate` = `"<exe>" --minimized`。不用 tauri-plugin-autostart：它的 Windows 实现（auto-launch 的 Dynamic 模式）在进程以管理员身份运行时会写到 **HKLM**，对全机生效，与"当前用户安装"不符（M5 实测）。状态每次从注册表读取；任务管理器中"禁用"（`Explorer\StartupApproved\Run` 首字节为奇数）视为关闭，在设置中重新打开时清除该标记。以 `--minimized` 启动时只驻留托盘，照常预加载模型；未部署时仍打开向导。部署向导完成页有"开机自动启动"复选框：首次部署默认勾上，重新部署时显示当前状态。M6 卸载时需删除该注册表值。
@@ -277,13 +277,19 @@ M5 实现（需求方确认，2026-11-20：关闭主窗口隐藏到托盘并首�
 
 ## 6. 安装包
 
-- NSIS，当前用户安装到 `%LOCALAPPDATA%\Programs\LLMTranslate`，免管理员。
-- 内容：主程序（含静态链接的 ONNX Runtime）、llama.cpp Vulkan 版所需文件（约 89 MB 未压缩）、OCR 模型（约 31 MB，`resources/ocr/`）、`models.json`；压缩后预计 < 100 MB。
-- M4 发现：ort 预编译的静态库带 DirectML，主程序因此**直接导入 `DirectML.dll`**，另外导入 `MSVCP140.dll`、`MSVCP140_1.dll`、`VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`。M6 需把 `DirectML.dll`（构建时 ort-sys 已复制到 target 目录）和这几个 VC++ DLL 放在主程序同目录（llama.cpp 那一份在 `llama/` 子目录，主程序用不到），并在干净 Win10 上验证。
-- 构建：`src-tauri/.cargo/config.toml` 把 `ORT_CACHE_DIR` 设为 `target/ort-cache`（默认位置在 C 盘，跨盘重命名会失败）。
-- WebView2：内嵌 bootstrapper（Win10 可能未预装）。
-- VC++ 运行库：llama.cpp 依赖 `MSVCP140.dll`、`VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`（UCRT `api-ms-win-crt-*` 为 Win10 系统自带）。采用**应用本地部署**：把这 3 个 DLL 放在 llama-server 同目录，无需安装 VC++ Redist。M6 在干净 Win10 上验证。
-- 卸载：询问是否同时删除已下载模型。
+M6 实现（需求方确认，2026-11-22：沿用 Tauri NSIS 当前用户默认安装目录；卸载时安全清理已知模型文件；替换 Fluent 蓝色"译"字应用图标；版本号保持 0.1.0）：
+
+- NSIS（`targets: ["nsis"]`，`installMode: "currentUser"`，`languages: ["SimpChinese"]`，LZMA 固实压缩），当前用户默认安装到 `%LOCALAPPDATA%\LLM Translate`（安装时可自选目录），免管理员（`RequestExecutionLevel user`）。
+- 内容：主程序（32.9 MiB，含静态链接的 ONNX Runtime）、llama.cpp Vulkan 版所需文件（约 89 MB 未压缩）、OCR 模型（约 31 MB，`resources/ocr/`）、`models.json`、运行时 DLL（`DirectML.dll` 1.15.4 + VC++ CRT）、内嵌 WebView2 bootstrapper；压缩后最终安装包 **56.91 MiB**（< 100 MB 目标）。
+- 运行时 DLL 应用本地部署（`scripts/prepare-runtime.ps1`）：
+  - 主程序同目录（`resources/runtime/` → `$INSTDIR\`）：`DirectML.dll`（取自 `ort-cache` 实体文件，18.5 MB）、`msvcp140.dll`、`msvcp140_1.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`。
+  - `llama/` 子目录（`resources/llama/` → `$INSTDIR\llama\`）：`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`。
+  - M6 已检查 release 版 `llm-translate.exe` PE 导入表（OS/Subsystem 6.0，无 delay-load，除系统 DLL / UCRT / `d3d12.dll` 外全部由上述 5 个 DLL 满足），并在安装版进程模块列表确认主程序与 `llama-server.exe` 均实际加载安装目录内的应用本地 DLL。
+- 构建：`src-tauri/.cargo/config.toml` 把 `ORT_CACHE_DIR` 设为 `target/ort-cache`（默认位置在 C 盘，跨盘重命名会失败）；执行 `cargo` 命令需在 `src-tauri/` 目录下或通过 `pnpm tauri build`。
+- WebView2：`webviewInstallMode: { type: "embedBootstrapper", silent: true }`（内嵌 `MicrosoftEdgeWebview2Setup.exe`，Win10 未预装时自动静默引导安装）。
+- 卸载（`src-tauri/nsis/hooks.nsh`，UTF-8 with BOM）：
+  - 非升级卸载（`$UpdateMode <> 1`）：删除 `HKCU\...\Run\LLM Translate`（Tauri 模板内置）、`Explorer\StartupApproved\Run\LLM Translate` 及 `HKCU\Software\LLMTranslate`；勾选"删除应用程序数据"时同步删除 `%APPDATA%\LLMTranslate` 与 `%LOCALAPPDATA%\LLMTranslate\logs`。
+  - 模型清理：保存设置与启动时将 `modelsDir` 同步写入 `HKCU\Software\LLMTranslate\ModelsDir`（原生 UTF-16，支持中文/自定义路径）；非静默非升级卸载时检测到已知模型 `.gguf` / `.gguf.part` 则弹窗询问是否一并删除，选"是"时仅删除清单中的已知模型文件并仅在空目录时 `RMDir`，绝不误删自定义目录中的其他文件。升级重装（`/UPDATE`）时跳过清理，保留自启、设置与模型。
 
 ## 7. 性能目标
 
@@ -307,7 +313,7 @@ M5 实现（需求方确认，2026-11-20：关闭主窗口隐藏到托盘并首�
 | 部分应用不支持 Ctrl+Insert | 提示改用截图翻译；黑名单 |
 | 鼠标钩子/模拟按键被杀软误报 | 个人自用，必要时加白；日志记录 |
 | ModelScope 是否有官方 GGUF 仓库 | M1 已核实：有，且国内直连最快 |
-| Win10 Acrylic 拖动卡顿 | 检测系统版本降级为纯色背景 |
+| Win10 Acrylic 拖动卡顿 | M6 已按系统版本（`build < 22000`）统一降级为 Fluent 纯色背景（浅 `#f3f3f3` / 深 `#202020`，关闭窗口透明并同步 WebView2 底色） |
 
 ## 9. 里程碑
 
@@ -325,6 +331,18 @@ M5 实现（需求方确认，2026-11-20：关闭主窗口隐藏到托盘并首�
 
 **划词测试矩阵**：Windows Terminal（cmd / PowerShell / WSL）、传统 conhost、Git Bash（mintty）、VS Code 集成终端、Xshell、MobaXterm、PuTTY、Chrome、Edge、Word、WPS、微信、记事本、资源管理器。
 
+- M6 验收（2026-11-22，Win11 build 26200 本机打包与性能实测；Win10 1809+ 按需求方要求通过代码与 PE 依赖静态检查）：
+  - **安装包**：`LLM Translate_0.1.0_x64-setup.exe`（**56.91 MiB**，< 100 MB），简体中文界面，免管理员当前用户安装到 `%LOCALAPPDATA%\LLM Translate`，Fluent 蓝色"译"字图标，内嵌 WebView2 bootstrapper；开始菜单快捷方式已验证含 `PKEY_AppUserModel_ID` = `com.llmtranslate.app`。
+  - **应用本地 DLL**：`llm-translate.exe` 实际从安装目录加载 `DirectML.dll`（1.15.4）、`MSVCP140.dll`、`MSVCP140_1.dll`、`VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`；`llama-server.exe` 实际从 `llama/` 目录加载 `MSVCP140.dll`、`VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`。
+  - **性能优化**：`wizard` 与 `shot` 改为按需懒创建（已部署启动仅预创建 `main`/`mini`/`popup` 3 个窗口，`wizard` 结束后销毁，`shot` 在截图拖选期间后台预热），启动耗时由 ~640–790 ms 降至 **472–496 ms**（冷启 678 ms），WebView2 渲染进程由 5 个减至 3 个（节省 ~138 MB 工作集 / ~109 MB 私有内存）。
+  - **性能实测 vs 第 7 节目标**（全部达标）：
+    - 启动到托盘就绪（不含模型加载）：**472–496 ms**（冷启 678 ms，目标 < 1 s）✅
+    - 2B 模型加载（SSD）：CPU **1.9 s**、Vulkan GPU **1.9–2.2 s**（目标 < 3 s）✅
+    - 划词点击 → 首字（2B，短句，CPU）：UIA 取词 6–27 ms（M3 实测）+ 安装版 2B CPU 首字 **144–163 ms** ≈ **150–190 ms**（总耗时 353–713 ms；目标 < 500 ms）✅
+    - 截图框选完成 → OCR 完成（1180×600，10 行中英混排，release 构建）：引擎冷加载 ~175 ms（与拖选重叠），热识别 **216–223 ms** + 段落合并 2 ms = **218–225 ms**（目标 < 300 ms）✅
+    - 应用自身内存（不含模型，空闲）：`llm-translate.exe` 工作集 **43.0 MB** / 私有 **19.5 MB**（目标 < 120 MB）✅
+  - **安装版行为与卸载验证**：关闭主窗口隐藏到托盘并触发首次通知（无错误、`trayHintShown` 置 true）；二次启动激活已有实例；`--minimized` 驻留托盘不弹窗；`/UPDATE /S` 升级卸载保留自启、设置与模型；`/S` 静默卸载清理安装目录与 `HKCU\...\Run` / `StartupApproved\Run` / `HKCU\Software\LLMTranslate` 并保留模型；交互式卸载勾选"删除应用程序数据"同步清理设置与日志，含中文路径的自定义 `modelsDir` 弹窗无乱码，选"是"仅安全删除已知 `.gguf`/`.part` 模型文件且保留同目录用户个人文件。
+  - **Win10 1809 (build 17763)+ 代码检查通过**：`windows.rs` 对 `build < 22000` 统一降级为纯色（`transparent(false)` + WebView2 底色 + `data-effect="solid"` + 浮窗 1 px 内描边），单测覆盖 `17763`/`19045`/`21999`/`22000`/`26200`；全量审计 Rust Win32 API、依赖 crate（`tao` 暗色标题栏支持 `>= 17763`、`tauri-plugin-single-instance`、`tauri-winrt-notification`）及 release PE 导入表（Subsystem 6.0、所有 API Set 均为 Win10 1809 自带、`DirectML.dll` 1.15.4 最低支持 Win10 1809）。
 - M5 验收（2026-11-20，Win11 build 26200，开发构建；界面经 CDP 驱动，快捷键用真实按键 `keybd_event` 触发，托盘菜单"退出"由需求方手动验证）：
   - 快捷键：录制 Ctrl+Alt+Q 后真实按键可呼出 / 隐藏迷你窗（测试机上 Alt+Q 被其他程序占用，启动时标"未生效"并有横幅）；录制 Alt+W 给划词开关提示与截图翻译相同；录制 Alt+Q 提示已被其他程序占用且原快捷键不变；Shift+A 被拒绝；Esc 取消。划词开关绑定 Ctrl+Alt+S 后真实按键切换总开关并写入设置。
   - 托盘：菜单项与快捷键文字、勾选状态正确；划词关闭时图标变灰、开启恢复；"设置"打开主窗口并切到设置页；"退出"正常（需求方验证），llama-server 随之结束。
