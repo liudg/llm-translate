@@ -2,7 +2,7 @@
 // (recorded), selection translation, models (management, backend / threads /
 // idle release), about.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, FolderOpen, Plus, RefreshCw, X } from "lucide-react";
+import { ChevronDown, Download, FolderOpen, Plus, RefreshCw, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -13,9 +13,10 @@ import {
   type Theme,
   type WindowProcess,
 } from "../../lib/api";
-import { mbToGb } from "../../lib/format";
-import { Button, Segmented, Select, Spinner, Toggle } from "../../components/ui";
+import { bytes, mbToGb } from "../../lib/format";
+import { Badge, Button, Progress, Segmented, Select, Spinner, Toggle } from "../../components/ui";
 import { useSettings } from "../../stores/settings";
+import { useUpdater } from "../../stores/updater";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { ModelList } from "./ModelList";
 const IDLE_CHOICES = [0, 5, 10, 30, 60];
@@ -367,6 +368,108 @@ function ProcessPicker({
   );
 }
 
+function AboutVersionRow({ info }: { info: AppInfo | null }) {
+  const snapshot = useUpdater((s) => s.snapshot);
+  const check = useUpdater((s) => s.check);
+  const install = useUpdater((s) => s.install);
+
+  const avail = snapshot.available;
+  const checking = snapshot.phase === "checking";
+  const downloading = snapshot.phase === "downloading";
+  const installing = snapshot.phase === "installing";
+  const prog = snapshot.progress;
+  const ratio = prog?.total ? prog.downloaded / prog.total : 0;
+
+  let statusHint: ReactNode = null;
+  if (snapshot.phase === "upToDate" && snapshot.manual) {
+    statusHint = <span className="text-green-700 dark:text-green-400">已是最新版本</span>;
+  } else if (snapshot.phase === "error" && snapshot.error) {
+    statusHint = <span className="text-red-600 dark:text-red-400">{snapshot.error}</span>;
+  } else if (downloading) {
+    statusHint = (
+      <span>
+        正在下载 v{avail?.version}…{" "}
+        {prog?.total
+          ? `${Math.min(100, Math.round(ratio * 100))}%（${bytes(prog.downloaded)} / ${bytes(prog.total)}）`
+          : prog
+            ? bytes(prog.downloaded)
+            : ""}
+      </span>
+    );
+  } else if (installing) {
+    statusHint = <span>正在安装 v{avail?.version}，完成后将自动重启…</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm">
+            <span>LLM Translate {info?.version ?? ""}</span>
+            {avail && <Badge tone="accent">新版本 v{avail.version}</Badge>}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs opacity-65">
+            {info && <span>Windows build {info.osBuild} · 窗口效果 {info.effect}</span>}
+            {statusHint && (
+              <>
+                {info && <span>·</span>}
+                <span className="opacity-100">{statusHint}</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {avail ? (
+            <>
+              {!downloading && !installing && (
+                <Button variant="subtle" icon={<RefreshCw className="size-4" />} onClick={check}>
+                  重新检查
+                </Button>
+              )}
+              <Button
+                variant="primary"
+                icon={downloading || installing ? <Spinner /> : <Download className="size-4" />}
+                disabled={downloading || installing}
+                onClick={install}
+              >
+                {downloading
+                  ? "下载中…"
+                  : installing
+                    ? "安装中…"
+                    : snapshot.phase === "error"
+                      ? "重试更新"
+                      : `更新到 v${avail.version}`}
+              </Button>
+            </>
+          ) : (
+            <Button icon={checking ? <Spinner /> : <RefreshCw className="size-4" />} disabled={checking} onClick={check}>
+              {checking ? "正在检查…" : "检查更新"}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {downloading && <Progress value={ratio} indeterminate={!prog?.total} />}
+      {installing && <Progress value={1} indeterminate />}
+
+      {avail && (avail.notes || avail.pubDate) && (
+        <div className="rounded-md border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-xs">
+          <div className="mb-1 flex items-center justify-between opacity-70">
+            <span className="font-medium">v{avail.version} 更新内容</span>
+            {avail.pubDate && <span>{avail.pubDate}</span>}
+          </div>
+          {avail.notes && (
+            <div className="selectable max-h-40 overflow-y-auto leading-relaxed whitespace-pre-wrap opacity-85">
+              {avail.notes}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo[]; visible: boolean }) {
   const settings = useSettings((s) => s.settings);
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -440,10 +543,7 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
         {mounted && <ModelGroup />}
 
         <Group title="关于">
-          <Row
-            title={`LLM Translate ${info?.version ?? ""}`}
-            desc={info ? `Windows build ${info.osBuild} · 窗口效果 ${info.effect}` : undefined}
-          />
+          <AboutVersionRow info={info} />
           <Row
             title="设置文件"
             desc={

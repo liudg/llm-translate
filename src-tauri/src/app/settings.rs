@@ -43,6 +43,8 @@ pub struct Settings {
     pub hotkeys: HotkeySettings,
     /// The "still running in the tray" notification was shown once.
     pub tray_hint_shown: bool,
+    /// Version tag (e.g. `0.2.0`) the user chose to ignore in the update banner.
+    pub ignored_update_version: Option<String>,
 }
 
 /// Global shortcuts as display strings such as `Ctrl+Alt+Q` (DESIGN 5.7);
@@ -96,6 +98,7 @@ impl Default for Settings {
             selection: SelectionSettings::default(),
             hotkeys: HotkeySettings::default(),
             tray_hint_shown: false,
+            ignored_update_version: None,
         }
     }
 }

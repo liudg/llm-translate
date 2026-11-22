@@ -64,6 +64,7 @@ oar-ocr = "0.11"
 image = { version = "0.25", default-features = false }
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "system-proxy"] }
 windows-registry = "0.6.1"
 
 

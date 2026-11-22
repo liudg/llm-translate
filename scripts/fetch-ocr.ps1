@@ -31,11 +31,25 @@ foreach ($name in $Files.Keys) {
     }
     Write-Host "download $name"
     $tmp = "$path.part"
-    Invoke-WebRequest -Uri ($Base + $name) -OutFile $tmp -UseBasicParsing
-    $got = (Get-FileHash $tmp -Algorithm SHA256).Hash
-    if ($got -ne $want) {
-        Remove-Item $tmp
-        throw "SHA256 mismatch for ${name}: $got"
+    $maxAttempts = 4
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri ($Base + $name) -OutFile $tmp -UseBasicParsing
+            $got = (Get-FileHash $tmp -Algorithm SHA256).Hash
+            if ($got -ne $want) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+                throw "SHA256 mismatch for ${name}: $got"
+            }
+            break
+        } catch {
+            Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+            if ($attempt -eq $maxAttempts) {
+                throw
+            }
+            $wait = [math]::Pow(2, $attempt)
+            Write-Warning "Attempt $attempt failed for ${name}: $($_.Exception.Message). Retrying in ${wait}s..."
+            Start-Sleep -Seconds $wait
+        }
     }
     Move-Item -Force $tmp $path
 }

@@ -6,4 +6,5 @@ pub mod paths;
 pub mod popup;
 pub mod settings;
 pub mod tray;
+pub mod updater;
 pub mod windows;

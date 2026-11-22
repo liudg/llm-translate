@@ -143,6 +143,7 @@ pub fn show_main(app: &AppHandle) {
         }
         let _ = w.set_focus();
     }
+    super::updater::on_main_shown(app);
     // Pre-warm mini & popup after the first deployment finishes.
     let _ = ensure_window(app, "mini");
     let _ = ensure_window(app, "popup");

@@ -171,9 +171,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(app::hotkey::plugin())
         .manage(Hotkeys::default())
         .manage(PopupState::default())
+        .manage(app::updater::UpdaterState::default())
         .setup(move |app| {
             let state = build_state(app.handle())?;
             let settings = state.settings.get();
@@ -302,6 +304,10 @@ pub fn run() {
             app::hotkey::hotkey_set,
             app::commands::autostart_enabled,
             app::commands::set_autostart,
+            app::updater::update_status,
+            app::updater::update_check,
+            app::updater::update_install,
+            app::updater::update_ignore,
             capture::shot_start,
             capture::shot_current,
             capture::shot_image,

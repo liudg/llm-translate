@@ -18,6 +18,7 @@ export interface Settings {
   selection: SelectionSettings;
   hotkeys: HotkeySettings;
   trayHintShown: boolean;
+  ignoredUpdateVersion: string | null;
 }
 
 /** Display strings such as `Ctrl+Alt+Q`; null when unbound. */
@@ -54,6 +55,28 @@ export interface AppInfo {
   effect: string;
   configDir: string;
   logsDir: string;
+}
+
+export interface AvailableUpdate {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+  pubDate: string | null;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
+export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
+
+export interface UpdateSnapshot {
+  phase: UpdatePhase;
+  manual: boolean;
+  available: AvailableUpdate | null;
+  progress: UpdateProgress | null;
+  error: string | null;
 }
 
 export type HotkeyId = "mini" | "shot" | "selection";
@@ -212,6 +235,10 @@ export const api = {
   openModelsDir: () => invoke<void>("open_models_dir"),
   openMini: () => invoke<void>("open_mini"),
   appInfo: () => invoke<AppInfo>("app_info"),
+  updateStatus: () => invoke<UpdateSnapshot>("update_status"),
+  updateCheck: () => invoke<UpdateSnapshot>("update_check"),
+  updateInstall: () => invoke<void>("update_install"),
+  updateIgnore: (version: string) => invoke<void>("update_ignore", { version }),
   hotkeys: () => invoke<HotkeyInfo[]>("hotkey_status"),
   hardware: () => invoke<HardwareInfo>("hardware_info"),
   setTheme: (theme: Theme) => invoke<void>("set_theme", { theme }),
@@ -261,6 +288,7 @@ export const events = {
   hotkeys: (cb: (h: HotkeyInfo[]) => void) => listen<HotkeyInfo[]>("hotkeys-changed", (e) => cb(e.payload)),
   /** Tray "settings": the main window switches page. */
   navigate: (cb: (page: string) => void) => listen<string>("navigate", (e) => cb(e.payload)),
+  updateState: (cb: (s: UpdateSnapshot) => void) => listen<UpdateSnapshot>("update-state", (e) => cb(e.payload)),
 };
 
 /** Tauri rejects with the serialized error value; normalize to text. */

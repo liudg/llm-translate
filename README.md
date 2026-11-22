@@ -37,6 +37,23 @@
 
 首次启动会打开部署向导；设置在 `%APPDATA%\LLMTranslate\settings.json`，日志与模型在 `%LOCALAPPDATA%\LLMTranslate\`。删除 `settings.json` 可重新走向导。
 
+## 发布与版本更新
+
+项目已接入 GitHub Actions 自动构建发布（[.github/workflows/release.yml](.github/workflows/release.yml)）与 Tauri v2 应用内更新（`tauri-plugin-updater`）：
+
+- 首次发版前需在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 配置私钥 Secret：`TAURI_SIGNING_PRIVATE_KEY`（如私钥设置了密码，同时配置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）。
+- 同步版本号并触发正式发布：
+
+  ```powershell
+  ./scripts/bump-version.ps1 -Version 0.2.0
+  git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+  git commit -m "Release v0.2.0"
+  git tag -a v0.2.0 -m "更新说明..."
+  git push origin HEAD --follow-tags
+  ```
+
+- 流水线会自动打包 NSIS 安装包、生成 `.sig` 签名与 `latest.json` 并直接发布到 GitHub Release。客户端在打开主面板时静默检查更新（30 分钟冷却），也可在「设置 → 关于」手动检查并一键下载覆盖安装。
+
 ## 测试
 
 ```powershell
