@@ -76,8 +76,14 @@ pub struct Control {
 }
 
 impl Control {
+    /// A cancel already asked for stays a cancel (closing the wizard pauses
+    /// everything it started; that must not keep a cancelled `.part`).
     pub fn stop(&self, reason: StopReason) {
-        *self.reason.lock().unwrap() = Some(reason);
+        let mut r = self.reason.lock().unwrap();
+        if *r != Some(StopReason::Cancel) {
+            *r = Some(reason);
+        }
+        drop(r);
         self.token.cancel();
     }
 

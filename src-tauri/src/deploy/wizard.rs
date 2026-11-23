@@ -101,20 +101,28 @@ pub async fn download_model(
         .cloned()
         .ok_or_else(|| DownloadError::Io(format!("未知模型 {model_id}")))?;
     let ctl = Control::default();
+    let from_wizard = window.label() == "wizard";
     {
         let mut map = state.downloads.lock().unwrap();
         if map.contains_key(&model_id) {
             return Err(DownloadError::Io("该模型正在下载".into()));
         }
-        map.insert(model_id.clone(), ActiveDownload { ctl: ctl.clone(), from_wizard: window.label() == "wizard" });
+        map.insert(model_id.clone(), ActiveDownload { ctl: ctl.clone(), from_wizard });
     }
     let emit_id = model_id.clone();
+    let emitter = app.clone();
     let progress: downloader::ProgressFn = Arc::new(move |p| {
-        let _ = app.emit("download-progress", DownloadEvent { model_id: emit_id.clone(), progress: p });
+        let _ = emitter.emit("download-progress", DownloadEvent { model_id: emit_id.clone(), progress: p });
     });
     tracing::info!("download {} -> {}", model.id, dir.display());
     let result = downloader::download(&state.http, &model, &dir, &ctl, progress).await;
     state.downloads.lock().unwrap().remove(&model_id);
+    if from_wizard {
+        // Only now is the `.part` final and the model free to resume, so the
+        // settings page refreshes here (e.g. after the wizard closed and
+        // paused this download) rather than when the pause was requested.
+        let _ = app.emit_to("main", "models-changed", ());
+    }
     match &result {
         Ok(p) => tracing::info!("download ok: {}", p.display()),
         Err(DownloadError::Cancelled) => {
@@ -195,7 +203,8 @@ pub fn on_wizard_closed(app: &AppHandle) {
             d.ctl.stop(StopReason::Pause);
         }
     }
-    let _ = app.emit_to("main", "models-changed", ());
+    // The settings page refreshes when each paused download has wound down
+    // (`download_model` emits `models-changed`).
     // A launch still running decides on its own (saves or stops the model);
     // reconfiguring under it would self-test the wrong model.
     if LAUNCHING.load(Ordering::SeqCst) {

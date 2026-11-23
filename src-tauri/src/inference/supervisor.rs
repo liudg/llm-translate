@@ -337,15 +337,21 @@ impl Supervisor {
         if let (Some(_), Status::Ready { port, .. }) = (&st.running, self.status()) {
             return Ok(port);
         }
-        self.recover_locked(&mut st).await
+        self.recover_locked(&mut st, 0).await
     }
 
-    /// Up to MAX_RESTARTS retries with backoff; then GPU -> CPU fallback.
-    async fn recover_locked(self: &Arc<Self>, st: &mut State) -> Result<u16, String> {
+    /// Start attempts `first..=MAX_RESTARTS` with backoff (none before the
+    /// first: a crash handler has already waited); then GPU -> CPU fallback.
+    /// `first > 0` continues after that many crashes, so every restart counts
+    /// towards the same limit (DESIGN 5.2: at most 3, then CPU).
+    async fn recover_locked(self: &Arc<Self>, st: &mut State, first: u32) -> Result<u16, String> {
         let mut last = String::new();
-        for attempt in 0..=MAX_RESTARTS {
-            if attempt > 0 {
+        for attempt in first..=MAX_RESTARTS {
+            if attempt > first {
                 tokio::time::sleep(Duration::from_secs(1 << (attempt - 1))).await;
+            }
+            if first > 0 {
+                st.crashes = attempt;
             }
             match self.start_locked(st).await {
                 Ok(p) => return Ok(p),
@@ -413,9 +419,10 @@ impl Supervisor {
             return; // someone stopped or restarted it meanwhile
         }
         // A failed restart is reported by start_locked itself (its exit
-        // monitor stays quiet), so retry and fall back here.
+        // monitor stays quiet), so the remaining restarts and the fallback
+        // happen here.
         let result = if n <= MAX_RESTARTS {
-            self.recover_locked(&mut st).await
+            self.recover_locked(&mut st, n).await
         } else {
             self.fallback_locked(&mut st, format!("推理程序连续崩溃 {n} 次")).await
         };

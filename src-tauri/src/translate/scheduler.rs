@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use futures_util::future::{BoxFuture, FutureExt, Shared};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -67,7 +68,11 @@ pub struct Translator {
     no_cache: std::sync::atomic::AtomicBool,
     current: Mutex<CancellationToken>,
     serial: tokio::sync::Mutex<()>,
+    /// The model start in progress, shared by every request that needs it.
+    starting: Mutex<Option<StartFuture>>,
 }
+
+type StartFuture = Shared<BoxFuture<'static, Result<u16, String>>>;
 
 impl Translator {
     pub fn new(sup: Arc<Supervisor>, manifest: Arc<Manifest>) -> Self {
@@ -79,7 +84,25 @@ impl Translator {
             no_cache: std::sync::atomic::AtomicBool::new(false),
             current: Mutex::new(CancellationToken::new()),
             serial: tokio::sync::Mutex::new(()),
+            starting: Mutex::new(None),
         }
+    }
+
+    /// Join the model start in progress, or begin one. It runs in its own
+    /// task: a cancelled request only stops waiting (dropping a half-done
+    /// start would leave llama-server running with the status stuck at
+    /// Loading), and the next request waits for the same start instead of
+    /// queueing a whole new round of retries behind it.
+    fn start_model(&self) -> StartFuture {
+        let mut slot = self.starting.lock().unwrap();
+        if let Some(f) = slot.as_ref().filter(|f| f.peek().is_none()) {
+            return f.clone();
+        }
+        let sup = self.sup.clone();
+        let task = tauri::async_runtime::spawn(async move { sup.ensure_ready().await });
+        let f = async move { task.await.map_err(|e| format!("启动推理失败：{e}"))? }.boxed().shared();
+        *slot = Some(f.clone());
+        f
     }
 
     /// Cancel whatever is running.
@@ -192,9 +215,9 @@ impl Translator {
             return Ok(TranslateEvent::Done { elapsed_ms: 0 });
         }
 
-        let model = self.model()?;
+        let mut model = self.model()?;
         let mut port = None;
-        self.stream_pieces(&model, &mut port, token, pieces, para_dir, &|text| sink(TranslateEvent::Delta { text }))
+        self.stream_pieces(&mut model, &mut port, token, pieces, para_dir, &|text| sink(TranslateEvent::Delta { text }))
             .await?;
         Ok(TranslateEvent::Done { elapsed_ms: t0.elapsed().as_millis() as u64 })
     }
@@ -220,7 +243,7 @@ impl Translator {
             if needs_model && model.is_none() {
                 model = Some(self.model()?);
             }
-            match &model {
+            match &mut model {
                 Some(m) => {
                     self.stream_pieces(m, &mut port, token, pieces, para_dir, &|text| {
                         sink(BatchEvent::Delta { index, text })
@@ -256,7 +279,7 @@ impl Translator {
     /// `port` starts the model on first use and is reused across calls.
     async fn stream_pieces(
         &self,
-        model: &ModelEntry,
+        model: &mut ModelEntry,
         port: &mut Option<u16>,
         token: &CancellationToken,
         pieces: Vec<Piece>,
@@ -288,16 +311,22 @@ impl Translator {
                 let p = match *port {
                     Some(p) => p,
                     None => {
-                        // Started in its own task: dropping a half-done start
-                        // (cancel / newer request) would leave llama-server
-                        // running with the status stuck at Loading.
-                        let sup = self.sup.clone();
-                        let start = tauri::async_runtime::spawn(async move { sup.ensure_ready().await });
                         let p = tokio::select! {
-                            r = start => r.map_err(|e| ChatError::Failed(format!("启动推理失败：{e}")))?.map_err(ChatError::Failed)?,
+                            r = self.start_model() => r.map_err(ChatError::Failed)?,
                             _ = token.cancelled() => return Err(ChatError::Cancelled),
                         };
                         *port = Some(p);
+                        // A model switch may have finished while we waited: the
+                        // prompt and cache key must belong to the model behind
+                        // this port.
+                        let running = self.model()?;
+                        if running.id != model.id {
+                            *model = running;
+                            if let Some(hit) = use_cache.then(|| self.cache.get(chunk, direction, &model.id)).flatten() {
+                                emit(hit);
+                                continue;
+                            }
+                        }
                         p
                     }
                 };

@@ -5,13 +5,20 @@
 //! the output. So the opening quote and what follows are held back until the
 //! first closing quote: more text after it (`"AI" is …`) means the quotes
 //! belong to the text, and everything is released with them; reaching the end
-//! right after it means a wrapper, and both quotes are dropped.
+//! right after it means a wrapper, and both quotes are dropped. No closing
+//! quote within `MAX_HELD_CHARS` keeps the quote and streams on, so a long
+//! answer the model wrapped in quotes still streams (its quotes then stay).
 
 const PREFIXES: &[&str] = &[
     "译文：", "译文:", "翻译：", "翻译:", "翻译结果：", "翻译结果:", "Translation:", "Translated text:",
 ];
 // No ASCII apostrophe: it often opens real text ('90s, 'Tis).
 const QUOTES: &[(char, char)] = &[('"', '"'), ('“', '”'), ('「', '」'), ('『', '』')];
+
+/// Longest text held after an opening quote while waiting for its closing
+/// quote. Quotes that belong to the text (a title, a term) close well before
+/// this.
+const MAX_HELD_CHARS: usize = 60;
 
 /// Text after an opening quote, held until it is clear whether the quote wraps
 /// the whole output.
@@ -105,12 +112,18 @@ impl Cleaner {
     fn hold(&mut self, text: &str) -> String {
         let held = self.held.as_mut().unwrap();
         held.text.push_str(text);
-        let Some(i) = held.text.find(held.close) else { return String::new() };
-        // Only whitespace after the first closing quote: may be the end.
-        if held.text[i + held.close.len_utf8()..].trim().is_empty() {
-            return String::new();
+        match held.text.find(held.close) {
+            // Only whitespace after the first closing quote: may be the end.
+            Some(i) if held.text[i + held.close.len_utf8()..].trim().is_empty() => return String::new(),
+            Some(_) => {}
+            // Still open: keep waiting, but not so long that a long answer
+            // stops streaming. Past this the quote is kept as text (a stray
+            // wrapper showing beats a whole paragraph appearing at once).
+            None if held.text.chars().count() <= MAX_HELD_CHARS => return String::new(),
+            None => {}
         }
-        // Text goes on after the closing quote: the quotes are part of it.
+        // Text goes on after the closing quote (or it never closed in time):
+        // the quote is part of the text.
         let held = self.held.take().unwrap();
         let mut out = String::from(held.open);
         out.push_str(&self.pass(&held.text));
@@ -192,6 +205,17 @@ mod tests {
         // Text after the closing quote: released at once, quotes kept.
         assert_eq!(c.push(" is"), "\"AI\" is");
         assert_eq!(c.push(" strong"), " strong");
+        assert_eq!(c.finish(), "");
+    }
+
+    #[test]
+    fn long_quoted_answer_keeps_streaming() {
+        let mut c = Cleaner::new("x");
+        assert_eq!(c.push("“"), "");
+        let words = "word ".repeat(13); // 65 chars, past MAX_HELD_CHARS
+        let out = c.push(&words);
+        assert_eq!(out, format!("“{}", words.trim_end()));
+        assert_eq!(c.push("end”"), " end”");
         assert_eq!(c.finish(), "");
     }
 }
