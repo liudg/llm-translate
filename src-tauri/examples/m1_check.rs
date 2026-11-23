@@ -165,7 +165,7 @@ async fn infer(models_dir: &Path) {
     let r = sup.ensure_ready().await;
     println!("  ensure_ready(): {r:?} in {:.1}s, status {:?}", t0.elapsed().as_secs_f64(), sup.status());
     assert!(r.is_ok());
-    assert_eq!(sup.spec().await.unwrap().backend, Backend::Cpu);
+    assert_eq!(sup.spec().unwrap().backend, Backend::Cpu);
     assert_eq!(notices.lock().unwrap().len(), 1);
 
     println!("[2] GPU translate, mixed-language paragraphs (direction per paragraph)");

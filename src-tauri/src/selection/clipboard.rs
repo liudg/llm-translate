@@ -14,7 +14,9 @@ use windows::core::w;
 use super::input;
 
 const CF_UNICODETEXT: u32 = 13;
-const MAX_FORMAT_BYTES: usize = 10 * 1024 * 1024;
+/// Larger formats are not saved, and restoring would then drop them: keep
+/// this above a 4K screenshot (3840x2160 CF_DIBV5 is ~33 MB).
+const MAX_FORMAT_BYTES: usize = 64 * 1024 * 1024;
 const POLL_TIMEOUT: Duration = Duration::from_millis(300);
 
 /// Raw HGLOBAL contents of every copyable clipboard format.
@@ -49,9 +51,11 @@ impl Drop for Open {
     }
 }
 
-fn save(owner: Option<HWND>) -> Saved {
+/// `None` when the clipboard could not be opened: restoring an empty save
+/// would wipe the user's clipboard.
+fn save(owner: Option<HWND>) -> Option<Saved> {
     let mut out = Vec::new();
-    let Some(_open) = Open::new(owner) else { return Saved(out) };
+    let _open = Open::new(owner)?;
     unsafe {
         let mut f = EnumClipboardFormats(0);
         while f != 0 {
@@ -71,7 +75,7 @@ fn save(owner: Option<HWND>) -> Saved {
             f = EnumClipboardFormats(f);
         }
     }
-    Saved(out)
+    Some(Saved(out))
 }
 
 fn set_raw(f: u32, data: &[u8]) {
@@ -145,6 +149,8 @@ pub enum CopyError {
     Unchanged,
     /// Clipboard changed but held no text (e.g. conhost's empty selection).
     Empty,
+    /// Another program keeps the clipboard open; it could not be saved.
+    Busy,
 }
 
 /// Send Ctrl+Insert to the focused window and read what it copied.
@@ -152,7 +158,7 @@ pub fn copy_selection(owner: Option<HWND>) -> Result<String, CopyError> {
     if !input::release_modifiers(Duration::from_millis(300)) {
         return Err(CopyError::ModifierHeld);
     }
-    let saved = save(owner);
+    let saved = save(owner).ok_or(CopyError::Busy)?;
     let seq0 = unsafe { GetClipboardSequenceNumber() };
     input::send(&[
         input::key(VK_CONTROL, false, false),

@@ -30,9 +30,19 @@ export default function Mini() {
       inputRef.current?.focus();
       inputRef.current?.select();
     });
+    // Esc closes from anywhere (e.g. after clicking 复制译文), not just the input.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.isComposing) {
+        e.preventDefault();
+        win.hide();
+      }
+    };
+    window.addEventListener("keydown", onKey);
     return () => {
       un.then((f) => f());
+      window.removeEventListener("keydown", onKey);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Grow the textarea with its content, up to MAX_INPUT_PX.
@@ -83,15 +93,13 @@ export default function Mini() {
           ref={inputRef}
           autoFocus
           rows={1}
+          maxLength={20000}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              win.hide();
             }
           }}
           placeholder="输入中文或英文，回车翻译"

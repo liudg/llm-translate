@@ -63,6 +63,8 @@ pub struct Translator {
     manifest: Arc<Manifest>,
     http: reqwest::Client,
     cache: Cache,
+    /// Self-test in progress: must reach the model, so no cache.
+    no_cache: std::sync::atomic::AtomicBool,
     current: Mutex<CancellationToken>,
     serial: tokio::sync::Mutex<()>,
 }
@@ -74,6 +76,7 @@ impl Translator {
             manifest,
             http: local_client(),
             cache: Cache::new(500),
+            no_cache: std::sync::atomic::AtomicBool::new(false),
             current: Mutex::new(CancellationToken::new()),
             serial: tokio::sync::Mutex::new(()),
         }
@@ -115,8 +118,23 @@ impl Translator {
         sink(event);
     }
 
-    /// Collect a whole translation (self-test). Cancels any earlier request.
+    /// Collect a whole translation from the model itself, never the cache
+    /// (deployment self-test). Cancels any earlier request.
     pub async fn translate_text(&self, text: &str, direction: Option<Direction>) -> Result<String, String> {
+        use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+        /// Resets the flag even if this future is dropped midway.
+        struct NoCache<'a>(&'a AtomicBool);
+        impl Drop for NoCache<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Relaxed);
+            }
+        }
+        self.no_cache.store(true, Relaxed);
+        let _reset = NoCache(&self.no_cache);
+        self.translate_collect(text, direction).await
+    }
+
+    async fn translate_collect(&self, text: &str, direction: Option<Direction>) -> Result<String, String> {
         let out = Mutex::new(String::new());
         let err = Mutex::new(None);
         self.translate(TranslateRequest { text: text.into(), direction }, |ev| match ev {
@@ -174,7 +192,7 @@ impl Translator {
             return Ok(TranslateEvent::Done { elapsed_ms: 0 });
         }
 
-        let model = self.model().await?;
+        let model = self.model()?;
         let mut port = None;
         self.stream_pieces(&model, &mut port, token, pieces, para_dir, &|text| sink(TranslateEvent::Delta { text }))
             .await?;
@@ -200,7 +218,7 @@ impl Translator {
             let pieces = segment(text);
             let needs_model = pieces.iter().any(|p| matches!(p, Piece::Text(c) if para_dir(c).is_some()));
             if needs_model && model.is_none() {
-                model = Some(self.model().await?);
+                model = Some(self.model()?);
             }
             match &model {
                 Some(m) => {
@@ -225,8 +243,8 @@ impl Translator {
     }
 
     /// The model entry of the configured launch spec.
-    async fn model(&self) -> Result<ModelEntry, ChatError> {
-        let spec = self.sup.spec().await.ok_or_else(|| ChatError::Failed("尚未部署模型".into()))?;
+    fn model(&self) -> Result<ModelEntry, ChatError> {
+        let spec = self.sup.spec().ok_or_else(|| ChatError::Failed("尚未部署模型".into()))?;
         self.manifest
             .get(&spec.model_id)
             .cloned()
@@ -262,15 +280,21 @@ impl Translator {
                 if i > 0 {
                     emit(joiner.into());
                 }
-                if let Some(hit) = self.cache.get(chunk, direction, &model.id) {
+                let use_cache = !self.no_cache.load(std::sync::atomic::Ordering::Relaxed);
+                if let Some(hit) = use_cache.then(|| self.cache.get(chunk, direction, &model.id)).flatten() {
                     emit(hit);
                     continue;
                 }
                 let p = match *port {
                     Some(p) => p,
                     None => {
+                        // Started in its own task: dropping a half-done start
+                        // (cancel / newer request) would leave llama-server
+                        // running with the status stuck at Loading.
+                        let sup = self.sup.clone();
+                        let start = tauri::async_runtime::spawn(async move { sup.ensure_ready().await });
                         let p = tokio::select! {
-                            r = self.sup.ensure_ready() => r.map_err(ChatError::Failed)?,
+                            r = start => r.map_err(|e| ChatError::Failed(format!("启动推理失败：{e}")))?.map_err(ChatError::Failed)?,
                             _ = token.cancelled() => return Err(ChatError::Cancelled),
                         };
                         *port = Some(p);
@@ -282,6 +306,8 @@ impl Translator {
                 let mut cleaner = Cleaner::new(chunk);
                 let mut shown = String::new();
                 stream_chat(&self.http, p, body, token, |d| {
+                    // A long CPU generation must not look idle.
+                    self.sup.touch();
                     let out = cleaner.push(d);
                     if !out.is_empty() {
                         shown.push_str(&out);

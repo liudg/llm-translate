@@ -19,30 +19,38 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
   const { copied, copy } = useCopy();
   const status = useInference((s) => s.status);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const timer = useRef<number>(undefined);
+  const [composing, setComposing] = useState(false);
   const miniKeys = hotkeys.find((h) => h.id === "mini" && h.registered)?.keys;
   const shotKeys = hotkeys.find((h) => h.id === "shot" && h.registered)?.keys;
 
-  // Translate after typing pauses; skip when nothing changed since the last request.
+  // Translate after typing pauses; skip when nothing changed since the last
+  // request, and while an IME is still composing (unconfirmed pinyin).
   useEffect(() => {
+    window.clearTimeout(timer.current);
     if (!source.trim()) {
       if (state.source || state.busy) clear();
       return;
     }
-    if (source === state.source && choice === state.choice) return;
-    const t = window.setTimeout(() => run(source, choice), DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
+    if (composing || (source === state.source && choice === state.choice)) return;
+    timer.current = window.setTimeout(() => run(source, choice), DEBOUNCE_MS);
+    return () => window.clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source]);
+  }, [source, composing]);
+
+  /** Translate at once; a pending debounced run (with older settings) is dropped. */
+  const runNow = (c: DirChoice) => {
+    window.clearTimeout(timer.current);
+    if (source.trim()) run(source, c);
+  };
 
   // Direction change: translate again at once.
   const changeChoice = (c: DirChoice) => {
     setChoice(c);
-    if (source.trim()) run(source, c);
+    runNow(c);
   };
 
-  const translateNow = () => {
-    if (source.trim()) run(source, choice);
-  };
+  const translateNow = () => runNow(choice);
 
   useEffect(() => inputRef.current?.focus(), []);
 
@@ -91,8 +99,10 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
             value={source}
             maxLength={MAX_CHARS}
             onChange={(e) => setSource(e.target.value)}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={() => setComposing(false)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && e.ctrlKey) {
+              if (e.key === "Enter" && e.ctrlKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 translateNow();
               }
@@ -110,6 +120,7 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
               title="清空"
               disabled={!source}
               onClick={() => {
+                window.clearTimeout(timer.current);
                 setSource("");
                 clear();
                 inputRef.current?.focus();

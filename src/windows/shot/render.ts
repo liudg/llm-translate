@@ -40,19 +40,16 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
       continue;
     }
     const candidate = line + (space ? " " : "") + tok;
-    if (!line || ctx.measureText(candidate).width <= maxWidth || NO_LINE_START.has(tok[0])) {
-      if (!line && ctx.measureText(tok).width > maxWidth) {
-        // A single word wider than the box: break it by characters.
-        for (const ch of tok) {
-          if (line && ctx.measureText(line + ch).width > maxWidth) push();
-          line += ch;
-        }
-      } else {
-        line = candidate;
+    if (line && ctx.measureText(candidate).width > maxWidth && !NO_LINE_START.has(tok[0])) push();
+    if (!line && ctx.measureText(tok).width > maxWidth) {
+      // A word wider than the box (URL, identifier): break it by characters
+      // so it never paints over what is beside the box.
+      for (const ch of tok) {
+        if (line && ctx.measureText(line + ch).width > maxWidth) push();
+        line += ch;
       }
     } else {
-      push();
-      line = tok;
+      line = line ? candidate : tok;
     }
     space = false;
   }
@@ -101,6 +98,24 @@ function fit(ctx: CanvasRenderingContext2D, p: ShotParagraph, text: string, dpr:
 
 const rgb = (c: [number, number, number]) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
 
+/**
+ * Latest layout per paragraph box, so a redraw while one paragraph streams
+ * does not re-wrap and re-fit every other one (a fit measures text many
+ * times). One entry per box: streaming prefixes replace each other.
+ */
+const layouts = new Map<string, { text: string; layout: Layout & { grown: boolean } }>();
+const MAX_LAYOUTS = 500;
+
+function cachedFit(ctx: CanvasRenderingContext2D, p: ShotParagraph, text: string, dpr: number) {
+  const key = `${p.rect.join(",")}|${p.room.join(",")}|${p.lineHeight}|${dpr}`;
+  const hit = layouts.get(key);
+  if (hit && hit.text === text) return hit.layout;
+  if (!hit && layouts.size >= MAX_LAYOUTS) layouts.clear();
+  const layout = fit(ctx, p, text, dpr);
+  layouts.set(key, { text, layout });
+  return layout;
+}
+
 export function drawParagraph(
   ctx: CanvasRenderingContext2D,
   p: ShotParagraph,
@@ -111,7 +126,7 @@ export function drawParagraph(
   const text = translation.trim();
   if (!text) return;
   const [x, y, w, h] = p.rect;
-  const { font, gap, lines, width, height, grown } = fit(ctx, p, text, dpr);
+  const { font, gap, lines, width, height, grown } = cachedFit(ctx, p, text, dpr);
   // Erase the original box plus whatever the text covers beyond it; text
   // that still does not fit at the minimum size runs on downward.
   const boxWidth = Math.max(w, Math.ceil(width));

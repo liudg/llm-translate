@@ -185,7 +185,13 @@ pub fn run() {
             let spec = state.spec_from_settings(&settings);
             let sup = state.sup.clone();
             let handle = app.handle().clone();
-            let selection = Selection::start(&settings.selection, move |cap| popup::show_capture(&handle, cap))
+            let selection = Selection::start(&settings.selection, move |cap| {
+                if app::tray::deployed(&handle) {
+                    popup::show_capture(&handle, cap);
+                } else {
+                    app::tray::open_primary(&handle);
+                }
+            })
                 .map(Arc::new)
                 .map_err(|e| tracing::error!("selection translation unavailable: {e}"))
                 .ok();

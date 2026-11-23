@@ -42,6 +42,10 @@ export default function Popup() {
     const unHide = events.popupHidden(() => {
       setPinned(false);
       if (busyRef.current) stop();
+      // Next capture opens clean instead of flashing this result first.
+      setPayload(null);
+      setExpanded(false);
+      clearRef.current();
     });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") api.popupClose();

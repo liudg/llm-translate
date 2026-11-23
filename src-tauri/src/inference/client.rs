@@ -67,6 +67,7 @@ pub async fn stream_chat(
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
     let mut full = String::new();
+    let mut finished = false;
     loop {
         let next = tokio::select! {
             n = stream.next() => n,
@@ -83,6 +84,9 @@ pub async fn stream_chat(
             if data == "[DONE]" {
                 return Ok(full);
             }
+            if data.contains("\"finish_reason\":\"") {
+                finished = true;
+            }
             if let Some(d) = delta_of(data) {
                 if !d.is_empty() {
                     on_delta(&d);
@@ -91,7 +95,9 @@ pub async fn stream_chat(
             }
         }
     }
-    Ok(full)
+    // Closed without [DONE] or a finish_reason: the server died mid-answer.
+    // A truncated translation must not look complete (or be cached).
+    if finished { Ok(full) } else { Err(ChatError::Failed("推理连接提前结束".into())) }
 }
 
 #[cfg(test)]

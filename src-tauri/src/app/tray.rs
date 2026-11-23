@@ -79,7 +79,13 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                     open_primary(app);
                 }
             }
-            "shot" => crate::capture::start(app, false),
+            "shot" => {
+                if deployed(app) {
+                    crate::capture::start(app, false);
+                } else {
+                    open_primary(app);
+                }
+            }
             "selection" => hotkey::toggle_selection(app),
             "settings" => {
                 if deployed(app) {
@@ -107,7 +113,7 @@ fn tooltip(selection_enabled: bool) -> String {
     if selection_enabled { NAME.to_string() } else { format!("{NAME}（划词翻译已关闭）") }
 }
 
-fn deployed(app: &AppHandle) -> bool {
+pub fn deployed(app: &AppHandle) -> bool {
     app.state::<AppState>().settings.get().deployed
 }
 

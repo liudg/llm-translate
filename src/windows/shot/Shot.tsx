@@ -192,7 +192,10 @@ export default function Shot() {
 
   const translations = paras.filter((p) => p.translatable && p.result.trim()).map((p) => p.result.trim());
   const sources = paras.map((p) => p.text);
-  const copyTranslation = () => copyText(translations.join("\n"), flashText);
+  const copyTranslation = () => {
+    // Ctrl+C also lands here: never overwrite the clipboard with nothing.
+    if (translations.length > 0) copyText(translations.join("\n"), flashText);
+  };
   const copySource = () => copyText(sources.join("\n"), flashSource);
   const copyImage = async () => {
     const c = canvasRef.current;

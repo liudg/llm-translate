@@ -235,9 +235,9 @@ fn short_err(e: &reqwest::Error) -> String {
     } else if e.is_connect() {
         "无法连接".into()
     } else {
-        let mut s = e.to_string();
-        s.truncate(120);
-        s
+        // By characters: OS messages are often Chinese, and cutting a
+        // String inside a multi-byte char panics.
+        e.to_string().chars().take(120).collect()
     }
 }
 

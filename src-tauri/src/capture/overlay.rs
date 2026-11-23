@@ -177,12 +177,54 @@ impl State {
         }
     }
 
-    fn paint(&self, i: usize, hdc: HDC) {
+    /// Size label of a selection: above it, or inside when there is no room.
+    /// `back`'s font must be selected.
+    fn label_rect(win: &Win, r: RECT, back: HDC) -> (String, RECT) {
+        let s = win.scale;
+        let label = format!("{} × {}", r.right - r.left, r.bottom - r.top);
+        let pad = (6.0 * s) as i32;
+        let size = text_size(back, &label);
+        let (lw, lh) = (size.cx + 2 * pad, size.cy + pad);
+        let gap = (4.0 * s) as i32;
+        let ly = if r.top - lh - gap >= 0 { r.top - lh - gap } else { r.top + gap };
+        let lx = r.left.clamp(0, (win.w - lw).max(0));
+        (label, RECT { left: lx, top: ly, right: lx + lw, bottom: ly + lh })
+    }
+
+    /// Everything a drag draws on window `i`: selection, outline and label.
+    fn drag_area(&self, i: usize) -> Option<RECT> {
+        let win = &self.wins[i];
+        let d = self.drag.as_ref().filter(|d| d.monitor == i)?;
+        let r = d.rect();
+        let label = unsafe {
+            let old = SelectObject(win.back.dc, win.font.into());
+            let (_, l) = Self::label_rect(win, r, win.back.dc);
+            SelectObject(win.back.dc, old);
+            l
+        };
+        let t = (2.0 * win.scale).ceil() as i32 + 1;
+        Some(RECT {
+            left: r.left.min(label.left) - t,
+            top: r.top.min(label.top) - t,
+            right: r.right.max(label.right) + t,
+            bottom: r.bottom.max(label.bottom) + t,
+        })
+    }
+
+    /// Repaint `clip` (the window's update region bounds). Only that part
+    /// is rebuilt and copied: a drag invalidates just what it changed, so
+    /// moving the mouse no longer copies the whole screen twice.
+    fn paint(&self, i: usize, hdc: HDC, clip: RECT) {
         let win = &self.wins[i];
         let (w, h, s) = (win.w, win.h, win.scale);
         let back = win.back.dc;
+        let c = RECT { left: clip.left.max(0), top: clip.top.max(0), right: clip.right.min(w), bottom: clip.bottom.min(h) };
+        let (cw, ch) = (c.right - c.left, c.bottom - c.top);
+        if cw <= 0 || ch <= 0 {
+            return;
+        }
         unsafe {
-            let _ = BitBlt(back, 0, 0, w, h, Some(win.dim.dc), 0, 0, SRCCOPY);
+            let _ = BitBlt(back, c.left, c.top, cw, ch, Some(win.dim.dc), c.left, c.top, SRCCOPY);
             let old_font = SelectObject(back, win.font.into());
             SetBkMode(back, TRANSPARENT);
             SetTextColor(back, COLORREF(0x00FF_FFFF));
@@ -192,15 +234,9 @@ impl State {
                     let (rw, rh) = (r.right - r.left, r.bottom - r.top);
                     let _ = BitBlt(back, r.left, r.top, rw, rh, Some(win.bright.dc), r.left, r.top, SRCCOPY);
                     outline(back, r, (1.5 * s).round().max(1.0) as i32);
-                    let label = format!("{rw} × {rh}");
-                    let pad = (6.0 * s) as i32;
-                    let size = text_size(back, &label);
-                    let (lw, lh) = (size.cx + 2 * pad, size.cy + pad);
-                    let gap = (4.0 * s) as i32;
-                    let ly = if r.top - lh - gap >= 0 { r.top - lh - gap } else { r.top + gap };
-                    let lx = r.left.clamp(0, (w - lw).max(0));
-                    pill(back, RECT { left: lx, top: ly, right: lx + lw, bottom: ly + lh }, (4.0 * s) as i32);
-                    draw_text(back, &label, RECT { left: lx, top: ly, right: lx + lw, bottom: ly + lh });
+                    let (label, lr) = Self::label_rect(win, r, back);
+                    pill(back, lr, (4.0 * s) as i32);
+                    draw_text(back, &label, lr);
                 }
                 None if self.drag.is_none() => {
                     let pad = (12.0 * s) as i32;
@@ -215,7 +251,7 @@ impl State {
                 None => {}
             }
             SelectObject(back, old_font);
-            let _ = BitBlt(hdc, 0, 0, w, h, Some(back), 0, 0, SRCCOPY);
+            let _ = BitBlt(hdc, c.left, c.top, cw, ch, Some(back), c.left, c.top, SRCCOPY);
         }
     }
 
@@ -284,7 +320,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
             with_state(|s| {
                 if let Some(i) = s.index(hwnd) {
-                    s.paint(i, hdc);
+                    s.paint(i, hdc, ps.rcPaint);
                 }
             });
             unsafe {
@@ -308,10 +344,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_MOUSEMOVE => with_state(|s| {
             let Some(i) = s.index(hwnd) else { return };
             let (w, h) = (s.wins[i].w, s.wins[i].h);
+            let before = s.drag_area(i);
             if let Some(d) = s.drag.as_mut().filter(|d| d.monitor == i && !s.done) {
                 let p = point(lp);
                 d.cur = POINT { x: p.x.clamp(0, w), y: p.y.clamp(0, h) };
-                let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
+                // Only the old and new selection (with outline and label).
+                let changed = match (before, s.drag_area(i)) {
+                    (Some(a), Some(b)) => Some(RECT {
+                        left: a.left.min(b.left),
+                        top: a.top.min(b.top),
+                        right: a.right.max(b.right),
+                        bottom: a.bottom.max(b.bottom),
+                    }),
+                    _ => None,
+                };
+                let _ = unsafe { InvalidateRect(Some(hwnd), changed.as_ref().map(|r| r as *const RECT), false) };
             }
         })
         .is_some(),

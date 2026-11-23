@@ -104,6 +104,9 @@ struct State {
 
 pub struct Supervisor {
     state: tokio::sync::Mutex<State>,
+    /// Copy of `State::spec` readable without waiting for a model load that
+    /// holds `state` (translation requests must stay cancellable meanwhile).
+    spec: Mutex<Option<LaunchSpec>>,
     status: watch::Sender<Status>,
     last_used: Mutex<Instant>,
     idle_minutes: AtomicU32,
@@ -157,6 +160,7 @@ impl Supervisor {
     pub fn new(on_notice: NoticeFn) -> Arc<Self> {
         let sup = Arc::new(Self {
             state: tokio::sync::Mutex::new(State { spec: None, running: None, generation: 0, crashes: 0 }),
+            spec: Mutex::new(None),
             status: watch::channel(Status::Unconfigured).0,
             last_used: Mutex::new(Instant::now()),
             idle_minutes: AtomicU32::new(0),
@@ -189,8 +193,14 @@ impl Supervisor {
         *self.last_used.lock().unwrap() = Instant::now();
     }
 
-    pub async fn spec(&self) -> Option<LaunchSpec> {
-        self.state.lock().await.spec.clone()
+    /// The configured launch spec. Never waits for a running start.
+    pub fn spec(&self) -> Option<LaunchSpec> {
+        self.spec.lock().unwrap().clone()
+    }
+
+    fn fail(&self, msg: String) -> String {
+        self.status.send_replace(Status::Failed { message: msg.clone() });
+        msg
     }
 
     /// Set what to run. Stops a running server whose spec differs.
@@ -200,6 +210,7 @@ impl Supervisor {
             return;
         }
         Self::stop_locked(&mut st).await;
+        *self.spec.lock().unwrap() = Some(spec.clone());
         st.spec = Some(spec);
         st.crashes = 0;
         self.status.send_replace(Status::Stopped);
@@ -235,22 +246,18 @@ impl Supervisor {
         Self::stop_locked(st).await;
         let spec = st.spec.clone().ok_or("尚未部署模型")?;
         if !spec.exe.exists() {
-            let msg = format!("找不到推理程序：{}", spec.exe.display());
-            self.status.send_replace(Status::Failed { message: msg.clone() });
-            return Err(msg);
+            return Err(self.fail(format!("找不到推理程序：{}", spec.exe.display())));
         }
         if !spec.model_path.exists() {
-            let msg = format!("找不到模型文件：{}", spec.model_path.display());
-            self.status.send_replace(Status::Failed { message: msg.clone() });
-            return Err(msg);
+            return Err(self.fail(format!("找不到模型文件：{}", spec.model_path.display())));
         }
         self.status.send_replace(Status::Loading { backend: spec.backend, model_id: spec.model_id.clone() });
 
-        let port = free_port().map_err(|e| format!("无法分配端口：{e}"))?;
+        let port = free_port().map_err(|e| self.fail(format!("无法分配端口：{e}")))?;
         if let Some(dir) = spec.log_path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let log = std::fs::File::create(&spec.log_path).map_err(|e| format!("无法写日志：{e}"))?;
+        let log = std::fs::File::create(&spec.log_path).map_err(|e| self.fail(format!("无法写日志：{e}")))?;
         let mut cmd = tokio::process::Command::new(&spec.exe);
         cmd.args(spec.args(port))
             .stdin(Stdio::null())
@@ -262,11 +269,7 @@ impl Supervisor {
             cmd.current_dir(dir);
         }
         tracing::info!("starting llama-server: {:?}", spec.args(port));
-        let mut child = cmd.spawn().map_err(|e| {
-            let msg = format!("无法启动推理程序：{e}");
-            self.status.send_replace(Status::Failed { message: msg.clone() });
-            msg
-        })?;
+        let mut child = cmd.spawn().map_err(|e| self.fail(format!("无法启动推理程序：{e}")))?;
         attach_to_job(&child);
 
         st.generation += 1;
@@ -303,16 +306,16 @@ impl Supervisor {
         loop {
             if *exited_rx.borrow() {
                 st.running = None;
+                // The monitor saw this exit too; the caller handles a failed
+                // start, so make the monitor's crash restart a no-op.
+                st.generation += 1;
                 let tail = log_tail(&spec.log_path);
                 let msg = if tail.is_empty() { "推理程序启动后退出".to_string() } else { format!("推理程序启动失败：{tail}") };
-                self.status.send_replace(Status::Failed { message: msg.clone() });
-                return Err(msg);
+                return Err(self.fail(msg));
             }
             if Instant::now() > deadline {
                 Self::stop_locked(st).await;
-                let msg = "模型加载超时".to_string();
-                self.status.send_replace(Status::Failed { message: msg.clone() });
-                return Err(msg);
+                return Err(self.fail("模型加载超时".to_string()));
             }
             if let Ok(r) = client.get(&url).send().await {
                 if r.status().is_success() {
@@ -360,16 +363,27 @@ impl Supervisor {
     }
 
     async fn fallback_locked(self: &Arc<Self>, st: &mut State, reason: String) -> Result<u16, String> {
-        let Some(spec) = st.spec.as_mut() else { return Err(reason) };
-        if spec.backend != Backend::Vulkan {
+        let Some(gpu) = st.spec.clone() else { return Err(reason) };
+        if gpu.backend != Backend::Vulkan {
             return Err(reason);
         }
-        spec.backend = Backend::Cpu;
-        spec.device = None;
+        let cpu = LaunchSpec { backend: Backend::Cpu, device: None, ..gpu.clone() };
+        st.spec = Some(cpu.clone());
         st.crashes = 0;
         tracing::warn!("falling back to CPU backend: {reason}");
-        (self.on_notice)(Notice::FellBackToCpu { reason: reason.clone() });
-        self.start_locked(st).await
+        match self.start_locked(st).await {
+            Ok(port) => {
+                *self.spec.lock().unwrap() = Some(cpu);
+                // Saved to settings only now: if CPU fails too the cause is
+                // not the GPU (e.g. a broken model) and the choice stays.
+                (self.on_notice)(Notice::FellBackToCpu { reason });
+                Ok(port)
+            }
+            Err(e) => {
+                st.spec = Some(gpu);
+                Err(e)
+            }
+        }
     }
 
     /// Boxed to break the start_locked -> monitor -> on_crash -> start_locked type cycle.
@@ -398,13 +412,18 @@ impl Supervisor {
         if st.generation != generation || st.running.is_some() {
             return; // someone stopped or restarted it meanwhile
         }
+        // A failed restart is reported by start_locked itself (its exit
+        // monitor stays quiet), so retry and fall back here.
         let result = if n <= MAX_RESTARTS {
-            self.start_locked(&mut st).await
+            self.recover_locked(&mut st).await
         } else {
             self.fallback_locked(&mut st, format!("推理程序连续崩溃 {n} 次")).await
         };
         if let Err(e) = result {
             tracing::error!("restart after crash failed: {e}");
+            // Not every failure path updates the status (e.g. no CPU fallback
+            // left); never leave "正在重启" showing when nothing is restarting.
+            self.fail(e);
         }
     }
 
@@ -417,6 +436,14 @@ impl Supervisor {
             return;
         }
         let mut st = self.state.lock().await;
+        // A request may have started the model or used it while we waited.
+        let minutes = self.idle_minutes.load(Ordering::Relaxed);
+        if minutes == 0
+            || !matches!(self.status(), Status::Ready { .. })
+            || self.last_used.lock().unwrap().elapsed() < Duration::from_secs(minutes as u64 * 60)
+        {
+            return;
+        }
         tracing::info!("releasing model after {minutes} idle minutes");
         Self::stop_locked(&mut st).await;
         self.status.send_replace(Status::Idle);
@@ -425,6 +452,38 @@ impl Supervisor {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// A server that exits during startup is reported by `start` alone: the
+    /// exit monitor must not restart it or overwrite the failure message.
+    #[tokio::test]
+    async fn early_exit_is_not_restarted_by_monitor() {
+        let tmp = std::env::temp_dir().join(format!("llmt-sup-test-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let model = tmp.join("model.gguf");
+        std::fs::write(&model, b"x").unwrap();
+        let sup = Supervisor::new(Arc::new(|_| {}));
+        sup.configure(LaunchSpec {
+            // Exits at once: stdin is null.
+            exe: PathBuf::from(std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into())),
+            model_path: model,
+            model_id: "test".into(),
+            backend: Backend::Cpu,
+            device: None,
+            threads: 1,
+            ctx: 512,
+            log_path: tmp.join("server.log"),
+        })
+        .await;
+        let err = sup.start().await.unwrap_err();
+        assert!(err.starts_with("推理程序启动"), "{err}");
+        // The monitor's crash handler would restart after a 1 s backoff.
+        tokio::time::sleep(Duration::from_millis(1800)).await;
+        assert_eq!(sup.status(), Status::Failed { message: err });
+        assert!(sup.state.lock().await.running.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn strips_ansi() {
         assert_eq!(

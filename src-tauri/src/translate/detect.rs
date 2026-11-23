@@ -32,6 +32,12 @@ fn is_latin(c: char) -> bool {
     c.is_ascii_alphabetic() || matches!(c as u32, 0xC0..=0x24F if c.is_alphabetic())
 }
 
+/// One CJK character carries about as much as a short English word, and
+/// Chinese technical text is full of long Latin identifiers ("配置
+/// llama-server 的参数"), so CJK counts this many times a Latin letter.
+const CJK_WEIGHT: usize = 3;
+
+/// (weighted CJK, Latin letters).
 fn counts(text: &str) -> (usize, usize) {
     let (mut cjk, mut latin) = (0usize, 0usize);
     for c in text.chars() {
@@ -41,7 +47,7 @@ fn counts(text: &str) -> (usize, usize) {
             latin += 1;
         }
     }
-    (cjk, latin)
+    (cjk * CJK_WEIGHT, latin)
 }
 
 /// Direction for a whole text (used for the overall label).
@@ -78,5 +84,9 @@ mod tests {
         assert_eq!(detect_paragraph("12345 / ----"), None);
         assert_eq!(detect_paragraph("OK"), Some(Direction::En2Zh));
         assert_eq!(detect_paragraph("好"), Some(Direction::Zh2En));
+        // Chinese sentences with long Latin identifiers stay Chinese.
+        assert_eq!(detect("配置 llama-server 的参数"), Direction::Zh2En);
+        assert_eq!(detect("这个 Rust 函数返回 Option<String>"), Direction::Zh2En);
+        assert_eq!(detect("Please restart the server after 更新"), Direction::En2Zh);
     }
 }

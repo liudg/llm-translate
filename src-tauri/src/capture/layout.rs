@@ -137,11 +137,34 @@ pub fn paragraphs(mut lines: Vec<Line>, bgra: &[u8], width: u32, height: u32) ->
     for (i, p) in out.iter_mut().enumerate() {
         p.room = img.room(i, &rects, p.bg);
     }
-    out.sort_by(|a, b| {
-        // Same visual row (tops within half a line) reads left to right.
-        let same_row = (a.rect[1] - b.rect[1]).abs() < 0.5 * a.line_height.min(b.line_height);
-        if same_row { a.rect[0].total_cmp(&b.rect[0]) } else { a.rect[1].total_cmp(&b.rect[1]) }
-    });
+    reading_order(out)
+}
+
+/// Top to bottom; paragraphs whose tops are within half a line of a row's
+/// first paragraph form one visual row, read left to right. Grouping first
+/// keeps the sort a total order (a pairwise "same row" comparator is not
+/// transitive, and `sort_by` may panic on that; release builds abort).
+fn reading_order(mut paras: Vec<Paragraph>) -> Vec<Paragraph> {
+    paras.sort_by(|a, b| a.rect[1].total_cmp(&b.rect[1]));
+    let mut out = Vec::with_capacity(paras.len());
+    let mut row: Vec<Paragraph> = Vec::new();
+    let mut row_top = 0.0f32;
+    let mut row_line = f32::MAX;
+    for p in paras {
+        if !row.is_empty() && p.rect[1] - row_top >= 0.5 * row_line.min(p.line_height) {
+            row.sort_by(|a, b| a.rect[0].total_cmp(&b.rect[0]));
+            out.append(&mut row);
+        }
+        if row.is_empty() {
+            row_top = p.rect[1];
+            row_line = p.line_height;
+        } else {
+            row_line = row_line.min(p.line_height);
+        }
+        row.push(p);
+    }
+    row.sort_by(|a, b| a.rect[0].total_cmp(&b.rect[0]));
+    out.append(&mut row);
     out
 }
 
@@ -269,6 +292,32 @@ mod tests {
 
     fn white(w: u32, h: u32) -> Vec<u8> {
         vec![255; (w * h * 4) as usize]
+    }
+
+    fn para(x: f32, y: f32, text: &str) -> Paragraph {
+        Paragraph {
+            rect: [x, y, 50.0, 20.0],
+            line_height: 20.0,
+            line_pitch: 20.0,
+            lines: 1,
+            text: text.into(),
+            translatable: true,
+            bg: [255; 3],
+            fg: [0; 3],
+            room: [50.0, 20.0],
+        }
+    }
+
+    #[test]
+    fn staggered_tops_sort_without_cycles() {
+        // Pairwise "same row" would say B<A, C<B but A<C: a cycle.
+        let out = reading_order(vec![para(200.0, 10.0, "A"), para(100.0, 18.0, "B"), para(0.0, 26.0, "C")]);
+        let order: Vec<&str> = out.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(order, ["B", "A", "C"]);
+        // Many jittered boxes must not panic and must keep every paragraph.
+        let many: Vec<Paragraph> =
+            (0..200).map(|i| para(((i * 37) % 500) as f32, ((i * 7) % 60) as f32, "x")).collect();
+        assert_eq!(reading_order(many).len(), 200);
     }
 
     #[test]

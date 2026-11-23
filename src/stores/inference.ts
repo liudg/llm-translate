@@ -19,7 +19,14 @@ let started = false;
 export function startInferenceSync() {
   if (started) return;
   started = true;
-  api.inferenceStatus().then((status) => useInference.setState({ status }));
-  events.status((status) => useInference.setState({ status }));
+  // Subscribe first; the snapshot only applies if no newer event came in.
+  let gotEvent = false;
+  events.status((status) => {
+    gotEvent = true;
+    useInference.setState({ status });
+  });
+  api.inferenceStatus().then((status) => {
+    if (!gotEvent) useInference.setState({ status });
+  });
   events.notice((notice) => useInference.setState({ notice }));
 }

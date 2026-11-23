@@ -54,8 +54,11 @@ struct Inner {
     paused: bool,
 }
 
+/// `Inner` is read by the shortcut handler on the main thread; `ops`
+/// serializes whole set / pause sequences (commands run concurrently on
+/// worker threads), so a pause cannot interleave with a rebind.
 #[derive(Default)]
-pub struct Hotkeys(Mutex<Inner>);
+pub struct Hotkeys(Mutex<Inner>, Mutex<()>);
 
 impl Hotkeys {
     pub fn status(&self) -> Vec<HotkeyInfo> {
@@ -119,7 +122,13 @@ pub fn plugin() -> TauriPlugin<Wry> {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            match app.state::<Hotkeys>().action_for(shortcut) {
+            let action = app.state::<Hotkeys>().action_for(shortcut);
+            // Before the first deployment these lead to the wizard instead.
+            if matches!(action, Some("mini" | "shot")) && !super::tray::deployed(app) {
+                super::tray::open_primary(app);
+                return;
+            }
+            match action {
                 Some("mini") => windows::toggle_mini(app),
                 Some("shot") => crate::capture::start(app, false),
                 Some("selection") => toggle_selection(app),
@@ -190,6 +199,7 @@ pub fn register_saved(app: &AppHandle) {
 /// register them again afterwards.
 pub fn set_paused(app: &AppHandle, paused: bool) {
     let hk = app.state::<Hotkeys>();
+    let _ops = hk.1.lock().unwrap();
     let entries = {
         let mut inner = hk.0.lock().unwrap();
         if inner.paused == paused {
@@ -233,6 +243,7 @@ pub fn set(app: &AppHandle, id: &str, keys: Option<String>) -> Result<(), String
     let id = IDS.into_iter().find(|i| *i == id).ok_or_else(|| format!("未知快捷键 {id}"))?;
     let new_sc = keys.as_deref().map(parse).transpose()?;
     let hk = app.state::<Hotkeys>();
+    let _ops = hk.1.lock().unwrap();
     let (old, paused) = {
         let inner = hk.0.lock().unwrap();
         if let Some(sc) = new_sc

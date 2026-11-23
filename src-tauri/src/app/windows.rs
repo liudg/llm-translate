@@ -93,7 +93,12 @@ pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindo
             .background_color(solid_color(theme))
             .initialization_script("document.documentElement.dataset.effect='solid';")
     };
-    let win = builder.build()?;
+    let win = match builder.build() {
+        Ok(w) => w,
+        // Another thread created it meanwhile (the screenshot session warms
+        // `shot` up in the background while also needing it): use that one.
+        Err(e) => return app.get_webview_window(label).ok_or(e),
+    };
     let _ = win.set_theme(tauri_theme(theme));
     if label == "main" {
         restore_main_placement(app);

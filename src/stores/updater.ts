@@ -68,6 +68,13 @@ let started = false;
 export function startUpdaterSync() {
   if (started) return;
   started = true;
-  api.updateStatus().then((snapshot) => useUpdater.setState({ snapshot }));
-  events.updateState((snapshot) => useUpdater.setState({ snapshot }));
+  // Subscribe first; the snapshot only applies if no newer event came in.
+  let gotEvent = false;
+  events.updateState((snapshot) => {
+    gotEvent = true;
+    useUpdater.setState({ snapshot });
+  });
+  api.updateStatus().then((snapshot) => {
+    if (!gotEvent) useUpdater.setState({ snapshot });
+  });
 }

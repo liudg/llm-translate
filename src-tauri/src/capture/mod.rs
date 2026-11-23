@@ -254,9 +254,11 @@ pub fn shot_current(state: State<'_, CaptureState>) -> Option<ShotPayload> {
     state.current.lock().unwrap().as_ref().map(|s| s.payload.clone())
 }
 
-/// The screenshot as raw RGBA.
+/// The screenshot as raw RGBA. Async (like `shot_copy_image`): sync commands
+/// run on the main thread, and converting / copying a 4K image there stalls
+/// every window.
 #[tauri::command]
-pub fn shot_image(state: State<'_, CaptureState>, id: u64) -> Result<Response, String> {
+pub async fn shot_image(state: State<'_, CaptureState>, id: u64) -> Result<Response, String> {
     let shot = state.shot(id)?;
     let mut rgba = shot.bgra.clone();
     for px in rgba.as_chunks_mut::<4>().0 {
@@ -300,7 +302,7 @@ pub fn shot_close(app: AppHandle) {
 /// Put an RGBA image (raw body; `x-width` / `x-height` headers) on the
 /// clipboard as a 24-bit DIB.
 #[tauri::command]
-pub fn shot_copy_image(app: AppHandle, request: Request<'_>) -> Result<(), String> {
+pub async fn shot_copy_image(app: AppHandle, request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(rgba) = request.body() else { return Err("缺少图像数据".into()) };
     let header = |k: &str| -> Option<usize> { request.headers().get(k)?.to_str().ok()?.parse().ok() };
     let (Some(w), Some(h)) = (header("x-width"), header("x-height")) else { return Err("缺少图像尺寸".into()) };

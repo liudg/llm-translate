@@ -95,25 +95,28 @@ pub fn show_capture(app: &AppHandle, cap: Capture) {
     let Ok(win) = crate::app::windows::ensure_window(app, LABEL) else { return };
     let state = app.state::<PopupState>();
     let visible = win.is_visible().unwrap_or(false);
-    let payload = {
+    let error = cap.text.is_none().then(|| unsupported_hint(app));
+    // Window calls below wait for the main thread, whose focus handler takes
+    // this lock: never hold it across them.
+    let (payload, place_height) = {
         let mut inner = state.0.lock().unwrap();
         inner.seq += 1;
-        let payload = SelectionPayload {
-            id: inner.seq,
-            error: cap.text.is_none().then(|| unsupported_hint(app)),
-            text: cap.text,
-        };
+        let payload = SelectionPayload { id: inner.seq, error, text: cap.text };
         inner.last = Some(payload.clone());
         let keep_place = inner.pinned && visible;
-        if !keep_place {
+        let place_height = (!keep_place).then(|| {
             inner.pinned = false;
             if inner.height <= 0.0 {
                 inner.height = INITIAL_HEIGHT;
             }
-            inner.above = place(&win, cap.anchor, inner.height);
-        }
-        payload
+            inner.height
+        });
+        (payload, place_height)
     };
+    if let Some(height) = place_height {
+        let above = place(&win, cap.anchor, height);
+        state.0.lock().unwrap().above = above;
+    }
     let _ = app.emit_to(LABEL, "selection-captured", payload);
     if !visible {
         let _ = win.show();
@@ -125,6 +128,8 @@ pub fn show_capture(app: &AppHandle, cap: Capture) {
 
 pub fn hide(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(LABEL) {
+        // The page clears itself on `popup-hidden` and reports its smaller
+        // height, so the next capture does not open at the old result's size.
         app.state::<PopupState>().0.lock().unwrap().pinned = false;
         let _ = win.hide();
         let _ = app.emit_to(LABEL, "popup-hidden", ());

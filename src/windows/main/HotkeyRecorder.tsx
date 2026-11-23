@@ -91,28 +91,47 @@ function Keys({ keys, dim = false }: { keys: string; dim?: boolean }) {
   );
 }
 
-export function HotkeyRecorder({ id, info }: { id: HotkeyId; info: HotkeyInfo | undefined }) {
+/** The recorder that is recording; starting another one ends it first. */
+let active: { stop: (resume?: boolean) => void } | null = null;
+
+export function HotkeyRecorder({
+  id,
+  info,
+  visible,
+}: {
+  id: HotkeyId;
+  info: HotkeyInfo | undefined;
+  /** The settings page is shown; it stays mounted while hidden. */
+  visible: boolean;
+}) {
   const [recording, setRecording] = useState(false);
   const [held, setHeld] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const recordingRef = useRef(false);
+  const self = useRef({ stop: (_resume?: boolean) => {} });
 
-  const stop = () => {
+  /** `resume: false` when another recorder takes over (shortcuts stay paused). */
+  const stop = (resume = true) => {
     if (!recordingRef.current) return;
     recordingRef.current = false;
+    if (active === self.current) active = null;
     setRecording(false);
     setHeld([]);
-    api.hotkeyPause(false);
+    if (resume) api.hotkeyPause(false);
   };
+  self.current.stop = stop;
 
   const start = () => {
     if (recordingRef.current || busy) return;
+    const handover = active !== null && active !== self.current;
+    if (handover) active!.stop(false);
+    active = self.current;
     recordingRef.current = true;
     setError(null);
     setHeld([]);
     setRecording(true);
-    api.hotkeyPause(true);
+    if (!handover) api.hotkeyPause(true);
   };
 
   const save = async (keys: string | null) => {
@@ -172,7 +191,12 @@ export function HotkeyRecorder({ id, info }: { id: HotkeyId; info: HotkeyInfo | 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording, busy]);
 
-  // Leaving the page (component unmount) must not leave shortcuts paused.
+  // Leaving the page (hidden, or unmounted) must not keep capturing keys or
+  // leave shortcuts paused.
+  useEffect(() => {
+    if (!visible) stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
   useEffect(() => () => stop(), []);
 
   const keys = info?.keys ?? null;
@@ -181,7 +205,7 @@ export function HotkeyRecorder({ id, info }: { id: HotkeyId; info: HotkeyInfo | 
       <div className="flex items-center gap-2">
         {!recording && keys && info && (info.registered ? <Badge tone="good">已生效</Badge> : <Badge tone="warn">未生效</Badge>)}
         <button
-          onClick={recording ? stop : start}
+          onClick={recording ? () => stop() : start}
           title={recording ? "Esc 取消 · Backspace 清除" : "点击后按下新的快捷键"}
           className={`flex h-8 min-w-36 items-center justify-center rounded-md border px-2 text-sm transition-colors ${
             recording

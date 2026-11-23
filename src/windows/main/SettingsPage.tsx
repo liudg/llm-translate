@@ -528,13 +528,13 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
 
         <Group title="快捷键">
           <Row title="输入翻译（迷你窗）" desc={hk("mini")?.error ?? "在任意位置按下即可呼出迷你翻译窗"}>
-            <HotkeyRecorder id="mini" info={hk("mini")} />
+            <HotkeyRecorder id="mini" info={hk("mini")} visible={visible} />
           </Row>
           <Row title="截图翻译" desc={hk("shot")?.error ?? "框选屏幕区域，译文覆盖在原文位置"}>
-            <HotkeyRecorder id="shot" info={hk("shot")} />
+            <HotkeyRecorder id="shot" info={hk("shot")} visible={visible} />
           </Row>
           <Row title="划词翻译开关" desc={hk("selection")?.error ?? "打开 / 关闭划词翻译；关闭时托盘图标变灰"}>
-            <HotkeyRecorder id="selection" info={hk("selection")} />
+            <HotkeyRecorder id="selection" info={hk("selection")} visible={visible} />
           </Row>
         </Group>
 

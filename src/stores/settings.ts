@@ -18,6 +18,13 @@ export function startSettingsSync() {
     useSettings.setState({ settings });
     applyTheme(settings.theme);
   };
-  events.settings(set);
-  api.getSettings().then(set);
+  // The snapshot only applies if no newer event came in.
+  let gotEvent = false;
+  events.settings((s) => {
+    gotEvent = true;
+    set(s);
+  });
+  api.getSettings().then((s) => {
+    if (!gotEvent) set(s);
+  });
 }
