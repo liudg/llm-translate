@@ -3,16 +3,33 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use super::downloader::{self, Control, DownloadError, Progress, StopReason};
 use super::hardware::{self, HardwareInfo, Recommendation};
 use super::manifest::ModelEntry;
 use crate::app::settings::Backend;
-use crate::state::AppState;
+use crate::state::{ActiveDownload, AppState};
+
+/// A launch + self-test (wizard or model switch) is running.
+static LAUNCHING: AtomicBool = AtomicBool::new(false);
+
+struct Launching;
+impl Launching {
+    fn begin() -> Self {
+        LAUNCHING.store(true, Ordering::SeqCst);
+        Launching
+    }
+}
+impl Drop for Launching {
+    fn drop(&mut self) {
+        LAUNCHING.store(false, Ordering::SeqCst);
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +90,7 @@ struct DownloadEvent {
 #[tauri::command]
 pub async fn download_model(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     model_id: String,
     dir: PathBuf,
@@ -88,7 +106,7 @@ pub async fn download_model(
         if map.contains_key(&model_id) {
             return Err(DownloadError::Io("该模型正在下载".into()));
         }
-        map.insert(model_id.clone(), ctl.clone());
+        map.insert(model_id.clone(), ActiveDownload { ctl: ctl.clone(), from_wizard: window.label() == "wizard" });
     }
     let emit_id = model_id.clone();
     let progress: downloader::ProgressFn = Arc::new(move |p| {
@@ -111,8 +129,8 @@ pub async fn download_model(
 #[tauri::command]
 pub fn download_control(state: State<'_, AppState>, model_id: String, action: String) {
     let reason = if action == "cancel" { StopReason::Cancel } else { StopReason::Pause };
-    if let Some(ctl) = state.downloads.lock().unwrap().get(&model_id) {
-        ctl.stop(reason);
+    if let Some(d) = state.downloads.lock().unwrap().get(&model_id) {
+        d.ctl.stop(reason);
     }
 }
 
@@ -151,11 +169,46 @@ pub async fn deploy_launch(
     threads: u32,
 ) -> Result<LaunchOutcome, String> {
     let model = state.manifest.get(&model_id).cloned().ok_or(format!("未知模型 {model_id}"))?;
+    let _launching = Launching::begin();
     let result = launch_and_test(&app, &state, &model, &dir, backend, device, threads).await;
     if result.is_err() {
         state.sup.stop().await;
     }
     result
+}
+
+/// The wizard is downloading or launching: closing it or clicking the tray
+/// icon must not throw that away silently.
+pub fn wizard_busy(app: &AppHandle) -> bool {
+    LAUNCHING.load(Ordering::SeqCst)
+        || app.state::<AppState>().downloads.lock().unwrap().values().any(|d| d.from_wizard)
+}
+
+/// Re-deploy wizard closed without finishing: pause its downloads (the
+/// `.part` stays; 设置 → 模型 offers 继续下载) and bring the saved model back,
+/// which the hardware detection step stopped.
+pub fn on_wizard_closed(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    for (id, d) in state.downloads.lock().unwrap().iter() {
+        if d.from_wizard {
+            tracing::info!("wizard closed; pausing download of {id}");
+            d.ctl.stop(StopReason::Pause);
+        }
+    }
+    let _ = app.emit_to("main", "models-changed", ());
+    // A launch still running decides on its own (saves or stops the model);
+    // reconfiguring under it would self-test the wrong model.
+    if LAUNCHING.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some(spec) = state.spec_from_settings(&state.settings.get()) else { return };
+    let sup = state.sup.clone();
+    tauri::async_runtime::spawn(async move {
+        sup.configure(spec).await;
+        if let Err(e) = sup.ensure_ready().await {
+            tracing::error!("reloading the model after closing the wizard failed: {e}");
+        }
+    });
 }
 
 /// Start `model` and run the self-test, falling back from GPU to CPU. Settings
@@ -246,6 +299,7 @@ pub async fn model_switch(app: AppHandle, state: State<'_, AppState>, model_id: 
     let s = state.settings.get();
     let previous = state.spec_from_settings(&s);
     tracing::info!("switching model {:?} -> {}", s.model_id, model.id);
+    let _launching = Launching::begin();
     let result = launch_and_test(&app, &state, &model, &s.models_dir, s.backend, s.device.clone(), s.threads).await;
     let Err(e) = result else { return result };
     tracing::warn!("switching to {} failed: {e}", model.id);

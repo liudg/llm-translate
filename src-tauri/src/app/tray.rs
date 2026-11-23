@@ -119,7 +119,13 @@ pub fn deployed(app: &AppHandle) -> bool {
 
 /// Main window when deployed, otherwise the deployment wizard.
 pub fn open_primary(app: &AppHandle) {
-    if deployed(app) {
+    let busy_wizard = app
+        .get_webview_window("wizard")
+        .filter(|w| w.is_visible().unwrap_or(false) && crate::deploy::wizard::wizard_busy(app));
+    if let Some(w) = busy_wizard {
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    } else if deployed(app) {
         windows::show_main(app);
     } else if let Ok(w) = windows::ensure_window(app, "wizard") {
         let _ = w.show();

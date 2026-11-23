@@ -43,6 +43,13 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
   }, [dir]);
 
   useEffect(refresh, [refresh, settings?.modelId]);
+  // Back from the wizard: a paused download now shows 继续下载 here.
+  useEffect(() => {
+    const un = events.modelsChanged(refresh);
+    return () => {
+      un.then((f) => f());
+    };
+  }, [refresh]);
   useEffect(() => onBusy(switching !== null), [switching, onBusy]);
 
   useEffect(() => {

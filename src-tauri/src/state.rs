@@ -11,13 +11,20 @@ use crate::deploy::manifest::{Manifest, ModelEntry};
 use crate::inference::supervisor::{LaunchSpec, Supervisor};
 use crate::translate::scheduler::Translator;
 
+/// A running model download and which window started it.
+pub struct ActiveDownload {
+    pub ctl: Control,
+    /// Started by the deployment wizard (paused when the wizard is closed).
+    pub from_wizard: bool,
+}
+
 pub struct AppState {
     pub settings: SettingsStore,
     pub manifest: Arc<Manifest>,
     pub llama_exe: PathBuf,
     pub sup: Arc<Supervisor>,
     pub translator: Arc<Translator>,
-    pub downloads: Mutex<HashMap<String, Control>>,
+    pub downloads: Mutex<HashMap<String, ActiveDownload>>,
     pub http: reqwest::Client,
 }
 

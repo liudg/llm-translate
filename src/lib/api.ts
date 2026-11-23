@@ -277,6 +277,8 @@ export const events = {
   download: (cb: (e: DownloadEvent) => void): Promise<UnlistenFn> =>
     listen<DownloadEvent>("download-progress", (e) => cb(e.payload)),
   launch: (cb: (e: LaunchEvent) => void) => listen<LaunchEvent>("deploy-launch", (e) => cb(e.payload)),
+  /** The wizard closed: downloaded / partial files may have changed. */
+  modelsChanged: (cb: () => void) => listen("models-changed", () => cb()),
   status: (cb: (s: InferenceStatus) => void) => listen<InferenceStatus>("inference-status", (e) => cb(e.payload)),
   notice: (cb: (n: InferenceNotice) => void) => listen<InferenceNotice>("inference-notice", (e) => cb(e.payload)),
   settings: (cb: (s: Settings) => void) => listen<Settings>("settings-changed", (e) => cb(e.payload)),

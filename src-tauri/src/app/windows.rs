@@ -155,11 +155,18 @@ pub fn show_main(app: &AppHandle) {
     // Hide the wizard immediately and destroy it asynchronously (outside its
     // own IPC / CloseRequested handler) so its WebView2 renderer is freed.
     if let Some(w) = app.get_webview_window("wizard") {
+        // Every way out of the wizard (close button, finish, tray menu) lands
+        // here: pause its downloads and bring the saved model back.
+        if w.is_visible().unwrap_or(false) {
+            crate::deploy::wizard::on_wizard_closed(app);
+        }
         let _ = w.hide();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            if let Some(w) = app.get_webview_window("wizard") {
+            if let Some(w) = app.get_webview_window("wizard")
+                && !w.is_visible().unwrap_or(false)
+            {
                 let _ = w.destroy();
             }
         });
