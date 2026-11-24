@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use serde::Serialize;
@@ -15,19 +15,20 @@ use super::manifest::ModelEntry;
 use crate::app::settings::Backend;
 use crate::state::{ActiveDownload, AppState};
 
-/// A launch + self-test (wizard or model switch) is running.
-static LAUNCHING: AtomicBool = AtomicBool::new(false);
+/// Launches + self-tests running (wizard and / or model switch). A count,
+/// so one ending does not clear it while the other still runs.
+static LAUNCHING: AtomicUsize = AtomicUsize::new(0);
 
 struct Launching;
 impl Launching {
     fn begin() -> Self {
-        LAUNCHING.store(true, Ordering::SeqCst);
+        LAUNCHING.fetch_add(1, Ordering::SeqCst);
         Launching
     }
 }
 impl Drop for Launching {
     fn drop(&mut self) {
-        LAUNCHING.store(false, Ordering::SeqCst);
+        LAUNCHING.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -109,6 +110,13 @@ pub async fn download_model(
         }
         map.insert(model_id.clone(), ActiveDownload { ctl: ctl.clone(), from_wizard });
     }
+    // Registered first, then checked: closing the wizard hides it, then
+    // pauses what is registered. So a download either gets paused by the
+    // close or sees the wizard gone here, never runs on unseen.
+    if from_wizard && !window.is_visible().unwrap_or(false) {
+        state.downloads.lock().unwrap().remove(&model_id);
+        return Err(DownloadError::Io("部署向导已关闭".into()));
+    }
     let emit_id = model_id.clone();
     let emitter = app.clone();
     let progress: downloader::ProgressFn = Arc::new(move |p| {
@@ -179,26 +187,53 @@ pub async fn deploy_launch(
     threads: u32,
 ) -> Result<LaunchOutcome, String> {
     let model = state.manifest.get(&model_id).cloned().ok_or(format!("未知模型 {model_id}"))?;
-    let _launching = Launching::begin();
-    // Closing the wizard hides it, then checks LAUNCHING (`show_main`); this
-    // sets LAUNCHING, then checks it is still shown. So either the close
-    // leaves the model to this launch, or this launch (from a wizard closed
-    // before its download finished) never starts and does not race the
-    // close's reload of the saved model.
+    // Who brings the saved model back after the wizard closes: closing hides
+    // the wizard, then reloads unless LAUNCHING is set (`on_wizard_closed`).
+    // A launch sets LAUNCHING, then checks visibility, and when it ends
+    // without saving it clears LAUNCHING, then checks again. Each side writes
+    // before it reads, so at least one of them sees the other and reloads
+    // (both reloading is harmless: it is the same spec).
+    let launching = Launching::begin();
     if !window.is_visible().unwrap_or(false) {
+        drop(launching);
+        reload_saved(&app);
         return Err("部署向导已关闭".into());
     }
     let result = launch_and_test(&app, &state, &model, &dir, backend, device, threads).await;
     if result.is_err() {
-        state.sup.stop().await;
+        drop(launching);
+        match state.spec_from_settings(&state.settings.get()) {
+            // Back to the saved model, not left on the failed candidate;
+            // started now if the wizard is gone, else on first use.
+            Some(saved) => {
+                state.sup.configure(saved).await;
+                if !window.is_visible().unwrap_or(false) {
+                    reload_saved(&app);
+                }
+            }
+            None => state.sup.stop().await,
+        }
     }
     result
+}
+
+/// Configure and start the model saved in settings (if any), in the background.
+fn reload_saved(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(spec) = state.spec_from_settings(&state.settings.get()) else { return };
+    let sup = state.sup.clone();
+    tauri::async_runtime::spawn(async move {
+        sup.configure(spec).await;
+        if let Err(e) = sup.ensure_ready().await {
+            tracing::error!("reloading the saved model after the wizard closed failed: {e}");
+        }
+    });
 }
 
 /// The wizard is downloading or launching: closing it or clicking the tray
 /// icon must not throw that away silently.
 pub fn wizard_busy(app: &AppHandle) -> bool {
-    LAUNCHING.load(Ordering::SeqCst)
+    LAUNCHING.load(Ordering::SeqCst) > 0
         || app.state::<AppState>().downloads.lock().unwrap().values().any(|d| d.from_wizard)
 }
 
@@ -215,19 +250,13 @@ pub fn on_wizard_closed(app: &AppHandle) {
     }
     // The settings page refreshes when each paused download has wound down
     // (`download_model` emits `models-changed`).
-    // A launch still running decides on its own (saves or stops the model);
-    // reconfiguring under it would self-test the wrong model.
-    if LAUNCHING.load(Ordering::SeqCst) {
+    // A launch still running reloads the saved model itself if it fails
+    // (see `deploy_launch`); reconfiguring under it would self-test the
+    // wrong model.
+    if LAUNCHING.load(Ordering::SeqCst) > 0 {
         return;
     }
-    let Some(spec) = state.spec_from_settings(&state.settings.get()) else { return };
-    let sup = state.sup.clone();
-    tauri::async_runtime::spawn(async move {
-        sup.configure(spec).await;
-        if let Err(e) = sup.ensure_ready().await {
-            tracing::error!("reloading the model after closing the wizard failed: {e}");
-        }
-    });
+    reload_saved(app);
 }
 
 /// Start `model` and run the self-test, falling back from GPU to CPU. Settings

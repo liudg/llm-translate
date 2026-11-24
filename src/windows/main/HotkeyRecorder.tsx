@@ -94,6 +94,19 @@ function Keys({ keys, dim = false }: { keys: string; dim?: boolean }) {
 /** The recorder that is recording; starting another one ends it first. */
 let active: { stop: (resume?: boolean) => void } | null = null;
 
+/**
+ * Pause / resume / set run strictly in the order the page issued them: the
+ * commands run concurrently in the backend, and a resume overtaking its pause
+ * (record, then leave the page at once) would leave every shortcut off.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+function inOrder<T>(f: () => Promise<T>): Promise<T> {
+  const next = queue.then(f);
+  queue = next.catch(() => {});
+  return next;
+}
+const setPaused = (paused: boolean) => void inOrder(() => api.hotkeyPause(paused)).catch(() => {});
+
 export function HotkeyRecorder({
   id,
   info,
@@ -118,7 +131,7 @@ export function HotkeyRecorder({
     if (active === self.current) active = null;
     setRecording(false);
     setHeld([]);
-    if (resume) api.hotkeyPause(false);
+    if (resume) setPaused(false);
   };
   self.current.stop = stop;
 
@@ -131,13 +144,13 @@ export function HotkeyRecorder({
     setError(null);
     setHeld([]);
     setRecording(true);
-    if (!handover) api.hotkeyPause(true);
+    if (!handover) setPaused(true);
   };
 
   const save = async (keys: string | null) => {
     setBusy(true);
     try {
-      await api.hotkeySet(id, keys);
+      await inOrder(() => api.hotkeySet(id, keys));
       setError(null);
     } catch (e) {
       setError(errorText(e));

@@ -332,12 +332,26 @@ impl Supervisor {
 
     /// Port of a ready server, starting it (with retries and CPU fallback) if needed.
     pub async fn ensure_ready(self: &Arc<Self>) -> Result<u16, String> {
+        self.ensure_ready_live().await.map(|(port, _)| port)
+    }
+
+    /// Like `ensure_ready`, plus the generation of the process behind the
+    /// port, for `is_live` (the port is stale once that process is replaced).
+    pub async fn ensure_ready_live(self: &Arc<Self>) -> Result<(u16, u64), String> {
         self.touch();
         let mut st = self.state.lock().await;
         if let (Some(_), Status::Ready { port, .. }) = (&st.running, self.status()) {
-            return Ok(port);
+            return Ok((port, st.generation));
         }
-        self.recover_locked(&mut st, 0).await
+        let port = self.recover_locked(&mut st, 0).await?;
+        Ok((port, st.generation))
+    }
+
+    /// The process `ensure_ready_live` returned with `generation` still runs.
+    /// Waits for a stop / start in progress, so a replaced process is seen.
+    pub async fn is_live(&self, generation: u64) -> bool {
+        let st = self.state.lock().await;
+        st.generation == generation && st.running.is_some()
     }
 
     /// Start attempts `first..=MAX_RESTARTS` with backoff (none before the

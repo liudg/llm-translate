@@ -65,15 +65,21 @@ pub struct Translator {
     manifest: Arc<Manifest>,
     http: reqwest::Client,
     cache: Cache,
-    /// Self-test in progress: must reach the model, so no cache.
-    no_cache: std::sync::atomic::AtomicBool,
     current: Mutex<CancellationToken>,
     serial: tokio::sync::Mutex<()>,
     /// The model start in progress, shared by every request that needs it.
     starting: Mutex<Option<Start>>,
 }
 
-type StartFuture = Shared<BoxFuture<'static, Result<u16, String>>>;
+/// Per request: the model's port once started, and whether the cache may
+/// answer (`false` for the self-test, which must reach the model).
+struct RunState {
+    port: Option<u16>,
+    use_cache: bool,
+}
+
+/// Port and generation of the started process (`Supervisor::is_live`).
+type StartFuture = Shared<BoxFuture<'static, Result<(u16, u64), String>>>;
 
 struct Start {
     fut: StartFuture,
@@ -90,7 +96,6 @@ impl Translator {
             manifest,
             http: local_client(),
             cache: Cache::new(500),
-            no_cache: std::sync::atomic::AtomicBool::new(false),
             current: Mutex::new(CancellationToken::new()),
             serial: tokio::sync::Mutex::new(()),
             starting: Mutex::new(None),
@@ -111,7 +116,7 @@ impl Translator {
         let done = Arc::new(AtomicBool::new(false));
         let flag = done.clone();
         let task = tauri::async_runtime::spawn(async move {
-            let r = sup.ensure_ready().await;
+            let r = sup.ensure_ready_live().await;
             flag.store(true, Ordering::SeqCst);
             r
         });
@@ -135,8 +140,14 @@ impl Translator {
 
     /// Translate, streaming events to `sink`. Cancels any earlier request.
     pub async fn translate(&self, req: TranslateRequest, sink: impl Fn(TranslateEvent) + Send + Sync) {
+        self.translate_with(req, true, sink).await
+    }
+
+    /// `use_cache: false` always asks the model (self-test). Per request: a
+    /// shared switch would be reset by one self-test while another runs.
+    async fn translate_with(&self, req: TranslateRequest, use_cache: bool, sink: impl Fn(TranslateEvent) + Send + Sync) {
         let token = self.begin();
-        let event = match self.run(&req, &token, &sink).await {
+        let event = match self.run(&req, use_cache, &token, &sink).await {
             Ok(ev) => ev,
             Err(ChatError::Cancelled) => TranslateEvent::Cancelled,
             Err(ChatError::Failed(m)) => TranslateEvent::Error { message: m },
@@ -159,23 +170,9 @@ impl Translator {
     /// Collect a whole translation from the model itself, never the cache
     /// (deployment self-test). Cancels any earlier request.
     pub async fn translate_text(&self, text: &str, direction: Option<Direction>) -> Result<String, String> {
-        use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-        /// Resets the flag even if this future is dropped midway.
-        struct NoCache<'a>(&'a AtomicBool);
-        impl Drop for NoCache<'_> {
-            fn drop(&mut self) {
-                self.0.store(false, Relaxed);
-            }
-        }
-        self.no_cache.store(true, Relaxed);
-        let _reset = NoCache(&self.no_cache);
-        self.translate_collect(text, direction).await
-    }
-
-    async fn translate_collect(&self, text: &str, direction: Option<Direction>) -> Result<String, String> {
         let out = Mutex::new(String::new());
         let err = Mutex::new(None);
-        self.translate(TranslateRequest { text: text.into(), direction }, |ev| match ev {
+        self.translate_with(TranslateRequest { text: text.into(), direction }, false, |ev| match ev {
             TranslateEvent::Delta { text } => out.lock().unwrap().push_str(&text),
             TranslateEvent::Error { message } => *err.lock().unwrap() = Some(message),
             TranslateEvent::Cancelled => *err.lock().unwrap() = Some("已取消".into()),
@@ -191,6 +188,7 @@ impl Translator {
     async fn run(
         &self,
         req: &TranslateRequest,
+        use_cache: bool,
         token: &CancellationToken,
         sink: &(impl Fn(TranslateEvent) + Send + Sync),
     ) -> Result<TranslateEvent, ChatError> {
@@ -231,8 +229,8 @@ impl Translator {
         }
 
         let mut model = self.model()?;
-        let mut port = None;
-        self.stream_pieces(&mut model, &mut port, token, pieces, para_dir, &|text| sink(TranslateEvent::Delta { text }))
+        let mut run = RunState { port: None, use_cache };
+        self.stream_pieces(&mut model, &mut run, token, pieces, para_dir, &|text| sink(TranslateEvent::Delta { text }))
             .await?;
         Ok(TranslateEvent::Done { elapsed_ms: t0.elapsed().as_millis() as u64 })
     }
@@ -250,7 +248,7 @@ impl Translator {
         let t0 = Instant::now();
         sink(BatchEvent::Start);
         let mut model = None;
-        let mut port = None;
+        let mut run = RunState { port: None, use_cache: true };
         for (index, text) in req.items.iter().enumerate() {
             let para_dir = |chunks: &[String]| detect_paragraph(&chunks.concat()).map(|d| req.direction.unwrap_or(d));
             let pieces = segment(text);
@@ -260,7 +258,7 @@ impl Translator {
             }
             match &mut model {
                 Some(m) => {
-                    self.stream_pieces(m, &mut port, token, pieces, para_dir, &|text| {
+                    self.stream_pieces(m, &mut run, token, pieces, para_dir, &|text| {
                         sink(BatchEvent::Delta { index, text })
                     })
                     .await?
@@ -280,6 +278,26 @@ impl Translator {
         Ok(BatchEvent::Done { elapsed_ms: t0.elapsed().as_millis() as u64 })
     }
 
+    /// Port of a running model. A shared start may hand back a process that
+    /// a model switch or idle release stopped while we waited for it: then
+    /// start (or join) again.
+    async fn live_port(&self, token: &CancellationToken) -> Result<u16, ChatError> {
+        for _ in 0..3 {
+            let (port, generation) = tokio::select! {
+                r = self.start_model() => r.map_err(ChatError::Failed)?,
+                _ = token.cancelled() => return Err(ChatError::Cancelled),
+            };
+            let live = tokio::select! {
+                l = self.sup.is_live(generation) => l,
+                _ = token.cancelled() => return Err(ChatError::Cancelled),
+            };
+            if live {
+                return Ok(port);
+            }
+        }
+        Err(ChatError::Failed("推理程序反复重启，请稍后重试".into()))
+    }
+
     /// The model entry of the configured launch spec.
     fn model(&self) -> Result<ModelEntry, ChatError> {
         let spec = self.sup.spec().ok_or_else(|| ChatError::Failed("尚未部署模型".into()))?;
@@ -291,11 +309,11 @@ impl Translator {
 
     /// Translate segmented pieces in order, streaming cleaned text to `emit`.
     /// `para_dir` gives a paragraph's direction (`None`: copy it unchanged);
-    /// `port` starts the model on first use and is reused across calls.
+    /// `run.port` starts the model on first use and is reused across calls.
     async fn stream_pieces(
         &self,
         model: &mut ModelEntry,
-        port: &mut Option<u16>,
+        run: &mut RunState,
         token: &CancellationToken,
         pieces: Vec<Piece>,
         para_dir: impl Fn(&[String]) -> Option<Direction>,
@@ -318,19 +336,16 @@ impl Translator {
                 if i > 0 {
                     emit(joiner.into());
                 }
-                let use_cache = !self.no_cache.load(std::sync::atomic::Ordering::Relaxed);
+                let use_cache = run.use_cache;
                 if let Some(hit) = use_cache.then(|| self.cache.get(chunk, direction, &model.id)).flatten() {
                     emit(hit);
                     continue;
                 }
-                let p = match *port {
+                let p = match run.port {
                     Some(p) => p,
                     None => {
-                        let p = tokio::select! {
-                            r = self.start_model() => r.map_err(ChatError::Failed)?,
-                            _ = token.cancelled() => return Err(ChatError::Cancelled),
-                        };
-                        *port = Some(p);
+                        let p = self.live_port(token).await?;
+                        run.port = Some(p);
                         // A model switch may have finished while we waited: the
                         // prompt and cache key must belong to the model behind
                         // this port.
