@@ -42,6 +42,18 @@ fn system_uses_dark_mode() -> bool {
         .is_ok_and(|v| v == 0)
 }
 
+/// Windows "Text size" (Settings > Accessibility), e.g. 1.25. WebView2
+/// multiplies it into the page's device pixel ratio, so one CSS pixel is
+/// `scale_factor * text_scale()` physical pixels, while tao's logical pixels
+/// are only `scale_factor`. Every window size derived from page CSS pixels
+/// must include it, or the page overflows its window.
+pub fn text_scale() -> f64 {
+    windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Accessibility")
+        .and_then(|k| k.get_u32("TextScaleFactor"))
+        .map_or(1.0, |v| (v.clamp(100, 225) as f64) / 100.0)
+}
+
 fn solid_color(theme: Theme) -> Color {
     let dark = match theme {
         Theme::Dark => true,
@@ -85,7 +97,8 @@ pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindo
         .find(|w| w.label == label)
         .ok_or_else(|| tauri::Error::WebviewNotFound)?;
     let theme = app.state::<crate::state::AppState>().settings.get().theme;
-    let builder = WebviewWindowBuilder::from_config(app, cfg)?;
+    let cfg = scaled_config(app, cfg);
+    let builder = WebviewWindowBuilder::from_config(app, &cfg)?;
     // The screenshot result window must show the image exactly, with
     // see-through margins: no backdrop.
     let builder = if cfg.label == crate::capture::LABEL {
@@ -112,6 +125,32 @@ pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindo
         restore_main_placement(app);
     }
     Ok(win)
+}
+
+/// The configured sizes are page CSS pixels: grow them by the text scale, but
+/// keep resizable windows within the primary monitor's work area.
+fn scaled_config(app: &AppHandle, cfg: &tauri::utils::config::WindowConfig) -> tauri::utils::config::WindowConfig {
+    let mut cfg = cfg.clone();
+    let ts = text_scale();
+    if ts <= 1.0 {
+        return cfg;
+    }
+    let (max_w, max_h) = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let a = m.work_area();
+            let sf = m.scale_factor();
+            (a.size.width as f64 / sf * 0.95, a.size.height as f64 / sf * 0.95)
+        })
+        .unwrap_or((f64::MAX, f64::MAX));
+    let fit = |v: f64, max: f64| if cfg.resizable { (v * ts).min(max).max(v) } else { v * ts };
+    cfg.width = fit(cfg.width, max_w);
+    cfg.height = fit(cfg.height, max_h);
+    cfg.min_width = cfg.min_width.map(|v| fit(v, max_w));
+    cfg.min_height = cfg.min_height.map(|v| fit(v, max_h));
+    cfg
 }
 
 /// Create only the windows needed at startup (all `"create": false` in

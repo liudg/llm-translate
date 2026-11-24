@@ -16,6 +16,7 @@ use std::time::Instant;
 use serde::Serialize;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 use crate::app::settings::SelectionSettings;
 
@@ -32,8 +33,10 @@ pub struct ScreenRect {
 pub struct Capture {
     /// Bounding box of the gesture's press and release points.
     pub anchor: ScreenRect,
-    /// `None`: neither UIA nor Ctrl+Insert produced text.
-    pub text: Option<String>,
+    /// Why neither UIA nor Ctrl+Insert produced text.
+    pub text: Result<String, clipboard::CopyError>,
+    /// Executable of the foreground window, e.g. `Code.exe`.
+    pub app: Option<String>,
 }
 
 pub struct Selection {
@@ -52,13 +55,13 @@ fn to_config(s: &SelectionSettings) -> hook::Config {
 
 /// Capture the selected text of the focused control: UIA first, then
 /// Ctrl+Insert. `owner` is the clipboard owner window.
-pub fn capture_text(uia: Option<&uia::Uia>, owner: Option<HWND>) -> Option<String> {
+pub fn capture_text(uia: Option<&uia::Uia>, owner: Option<HWND>) -> Result<String, clipboard::CopyError> {
     let t0 = Instant::now();
     if let Some(u) = uia {
         match u.selection() {
             Ok(s) if !s.trim().is_empty() => {
                 tracing::info!("selection via UIA: {} chars in {} ms", s.chars().count(), t0.elapsed().as_millis());
-                return Some(s);
+                return Ok(s);
             }
             Ok(_) => tracing::debug!("UIA: no selection"),
             Err(e) => tracing::debug!("UIA failed: {e}"),
@@ -74,11 +77,11 @@ pub fn capture_text(uia: Option<&uia::Uia>, owner: Option<HWND>) -> Option<Strin
                 t1.elapsed().as_millis(),
                 (t1 - t0).as_millis()
             );
-            Some(s)
+            Ok(s)
         }
         Err(e) => {
             tracing::info!("selection capture failed: {e:?} after {} ms", t0.elapsed().as_millis());
-            None
+            Err(e)
         }
     }
 }
@@ -102,8 +105,13 @@ impl Selection {
             }
             let uia = uia::Uia::new().map_err(|e| tracing::error!("UI Automation unavailable: {e}")).ok();
             for anchor in rx {
+                let fg = unsafe { GetForegroundWindow() };
+                let app = (!fg.is_invalid()).then(|| blacklist::process_name(blacklist::window_pid(fg))).flatten();
                 let text = capture_text(uia.as_ref(), Some(HWND(owner as *mut _)));
-                on_capture(Capture { anchor, text });
+                if text.is_err() {
+                    tracing::info!("selection capture failed in {}", app.as_deref().unwrap_or("?"));
+                }
+                on_capture(Capture { anchor, text, app });
             }
         })?;
         Ok(Self { cfg })

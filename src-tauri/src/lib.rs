@@ -309,6 +309,7 @@ pub fn run() {
             app::popup::popup_set_height,
             app::popup::popup_set_pinned,
             app::popup::popup_close,
+            app::popup::popup_block_app,
             app::popup::popup_current,
             app::hotkey::hotkey_status,
             app::hotkey::hotkey_pause,

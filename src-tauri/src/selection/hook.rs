@@ -152,6 +152,10 @@ unsafe extern "system" fn keyboard_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LR
 
 struct Down {
     pt: POINT,
+    /// Cursor shape at the press (`None`: could be over text).
+    cursor: Option<&'static str>,
+    /// The press was under the standard I-beam.
+    ibeam: bool,
     /// Top-level window under the press and its rectangle, to tell a window
     /// move/resize from a text drag.
     root: HWND,
@@ -212,14 +216,18 @@ impl Tracker {
         }
         self.hide();
         let root = unsafe { GetAncestor(WindowFromPoint(pt), GA_ROOT) };
-        self.down = (!root.is_invalid()).then(|| Down { pt, root, rect: window_rect(root) });
+        self.down =
+            (!root.is_invalid()).then(|| Down { pt, cursor: non_text_cursor(), ibeam: ibeam_cursor(), root, rect: window_rect(root) });
     }
 
     fn on_up(&mut self, pt: POINT, time: u32, shift: bool) {
         if self.icon.visible && contains(&self.icon.rect, pt) {
             return;
         }
-        let Some(down) = self.down.take() else { return };
+        let Some(down) = self.down.take() else {
+            tracing::debug!("button up without a tracked press");
+            return;
+        };
         let cfg = self.cfg.read().unwrap().clone();
         let s = scale_at(pt);
         let moved = (pt.x - down.pt.x).abs().max((pt.y - down.pt.y).abs());
@@ -238,14 +246,56 @@ impl Tracker {
         } else {
             shift && cfg.shift_click
         };
+        let up_cursor = non_text_cursor();
+        if tracing::enabled!(tracing::Level::DEBUG) && (is_drag || is_double) {
+            let r = down.rect;
+            tracing::debug!(
+                "gesture: drag={is_drag} double={is_double} moved={moved}px wanted={wanted} cursor={:?}->{:?}                  ibeam={} root={} ({}) rect=({},{},{},{}) fullscreen={} topmost={} fg={}",
+                down.cursor,
+                up_cursor,
+                down.ibeam,
+                blacklist::class_name(down.root),
+                blacklist::process_name(blacklist::window_pid(down.root)).unwrap_or_default(),
+                r.left,
+                r.top,
+                r.right,
+                r.bottom,
+                borderless_fullscreen(down.root),
+                is_topmost(down.root),
+                blacklist::process_name(blacklist::window_pid(unsafe { GetForegroundWindow() })).unwrap_or_default(),
+            );
+        }
         if !wanted {
             return;
         }
         if is_drag && window_rect(down.root) != down.rect {
-            return; // the drag moved or resized a window
+            tracing::debug!("selection icon skipped: the drag moved or resized a window");
+            return;
+        }
+        // Text selection starts or ends over text, under an I-beam (or an
+        // app's own cursor). Arrow / crosshair / hidden cursors at both ends
+        // mean a game, a canvas or a screenshot overlay.
+        // Plain arrows are common over selectable text (terminals in mouse
+        // mode, `cursor: default` web text), so they only count together
+        // with a borderless full-screen window, the usual game setup.
+        if let (Some(at_down), Some(at_up)) = (down.cursor, up_cursor)
+            && (at_down != "arrow" || at_up != "arrow" || borderless_fullscreen(down.root))
+        {
+            let fg = unsafe { GetForegroundWindow() };
+            let exe = blacklist::process_name(blacklist::window_pid(fg)).unwrap_or_default();
+            tracing::debug!("selection icon skipped: cursor {at_down} -> {at_up} in {exe}");
+            return;
+        }
+        // A window covering the whole monitor that is topmost, or that never
+        // shows the I-beam, is a screenshot overlay (Feishu, WeChat, QQ,
+        // Snipaste...) or a game drawing its own cursor.
+        if borderless_fullscreen(down.root) && (is_topmost(down.root) || !(down.ibeam || ibeam_cursor())) {
+            tracing::debug!("selection icon skipped: full-screen overlay {}", blacklist::class_name(down.root));
+            return;
         }
         let fg = unsafe { GetForegroundWindow() };
         if fg.is_invalid() {
+            tracing::debug!("selection icon skipped: no foreground window");
             return;
         }
         if let Err(skip) = blacklist::check(fg, &cfg.blacklist) {
@@ -306,6 +356,64 @@ impl Tracker {
             self.hide();
             let _ = self.jobs.send(anchor);
         }
+    }
+}
+
+/// The window covers its whole monitor without being maximized: a game or a
+/// video in borderless full-screen.
+fn borderless_fullscreen(h: HWND) -> bool {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONULL, MONITORINFO, MonitorFromWindow};
+    unsafe {
+        if IsZoomed(h).as_bool() {
+            return false;
+        }
+        let m = MonitorFromWindow(h, MONITOR_DEFAULTTONULL);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if m.is_invalid() || !GetMonitorInfoW(m, &mut mi).as_bool() {
+            return false;
+        }
+        let (w, r) = (window_rect(h), mi.rcMonitor);
+        w.left <= r.left && w.top <= r.top && w.right >= r.right && w.bottom >= r.bottom
+    }
+}
+
+fn is_topmost(h: HWND) -> bool {
+    unsafe { GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0 }
+}
+
+fn ibeam_cursor() -> bool {
+    unsafe {
+        let mut ci = CURSORINFO { cbSize: std::mem::size_of::<CURSORINFO>() as u32, ..Default::default() };
+        GetCursorInfo(&mut ci).is_ok() && LoadCursorW(None, IDC_IBEAM).is_ok_and(|c| c == ci.hCursor)
+    }
+}
+
+/// The current cursor's shape when it rules out selectable text (hidden or a
+/// standard non-text shape); `None` otherwise. Custom cursors may be over
+/// text, since some editors draw their own I-beam.
+fn non_text_cursor() -> Option<&'static str> {
+    unsafe {
+        let mut ci = CURSORINFO { cbSize: std::mem::size_of::<CURSORINFO>() as u32, ..Default::default() };
+        if GetCursorInfo(&mut ci).is_err() {
+            return None;
+        }
+        if ci.flags.0 & (CURSOR_SHOWING.0 | CURSOR_SUPPRESSED.0) == 0 || ci.hCursor.is_invalid() {
+            return Some("hidden"); // games draw their own pointer
+        }
+        let not_text = [
+            (IDC_ARROW, "arrow"),
+            (IDC_CROSS, "cross"),
+            (IDC_HAND, "hand"),
+            (IDC_SIZEALL, "size-all"),
+            (IDC_SIZENWSE, "size-nwse"),
+            (IDC_SIZENESW, "size-nesw"),
+            (IDC_SIZEWE, "size-we"),
+            (IDC_SIZENS, "size-ns"),
+            (IDC_NO, "no"),
+            (IDC_WAIT, "wait"),
+            (IDC_APPSTARTING, "app-starting"),
+        ];
+        not_text.into_iter().find(|(id, _)| LoadCursorW(None, *id).is_ok_and(|c| c == ci.hCursor)).map(|(_, n)| n)
     }
 }
 

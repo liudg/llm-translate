@@ -3,7 +3,7 @@
 // The window height follows the content.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
+import { PhysicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import { CornerDownLeft, Languages, Square } from "lucide-react";
 import { NEXT_CHOICE, footerText, useTranslator, type DirChoice } from "../../lib/useTranslator";
 import { useAutoHeight } from "../../lib/useAutoHeight";
@@ -52,7 +52,12 @@ export default function Mini() {
   }, [text]);
 
   // Window height follows the content.
-  useAutoHeight(rootRef, (h) => win.setSize(new LogicalSize(WIDTH, h)));
+  // Physical pixels from the page's own pixel ratio: tao's logical pixels
+  // leave out the Windows text size, which WebView2 applies to the page.
+  useAutoHeight(rootRef, (h) => {
+    const dpr = window.devicePixelRatio;
+    win.setSize(new PhysicalSize(Math.round(WIDTH * dpr), Math.ceil(h * dpr)));
+  });
 
   const submit = () => {
     if (text.trim()) run(text, choice);

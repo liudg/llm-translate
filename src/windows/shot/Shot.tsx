@@ -220,9 +220,9 @@ export default function Shot() {
     statusText = `已翻译 ${total} 段`;
   }
 
-  // Sizes in DIPs of the capture monitor. Dragged to a monitor with another
-  // scale, Windows rescales the window and these stay proportional.
-  const dpr = shot.scale;
+  // Sizes in CSS pixels of the capture monitor. Dragged to a monitor with
+  // another scale, Windows rescales the window and these stay proportional.
+  const dpr = shot.cssScale;
   const imgStyle = {
     left: shot.imageX / dpr,
     top: shot.imageY / dpr,

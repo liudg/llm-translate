@@ -7,6 +7,8 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 
+use crate::app::windows::text_scale;
+use crate::selection::clipboard::CopyError;
 use crate::selection::{Capture, ScreenRect};
 use crate::state::AppState;
 
@@ -17,10 +19,19 @@ const WIDTH: f64 = 440.0;
 const MAX_HEIGHT: f64 = 420.0;
 const INITIAL_HEIGHT: f64 = 120.0;
 
-fn unsupported_hint(app: &AppHandle) -> String {
-    match app.state::<AppState>().settings.get().hotkeys.shot {
-        Some(keys) if !keys.is_empty() => format!("该应用不支持划词，可使用截图翻译（{keys}）"),
-        _ => "该应用不支持划词，可使用截图翻译".to_string(),
+/// Message for a failed capture, and whether the app itself is to blame (so
+/// the popup offers to stop showing the icon there).
+fn failure_hint(app: &AppHandle, err: CopyError) -> (String, bool) {
+    match err {
+        CopyError::Busy => ("剪贴板正被其他程序占用，请稍后重试".to_string(), false),
+        CopyError::ModifierHeld => ("请先松开 Alt 键再点击翻译图标".to_string(), false),
+        CopyError::Unchanged | CopyError::Empty => {
+            let hint = match app.state::<AppState>().settings.get().hotkeys.shot {
+                Some(keys) if !keys.is_empty() => format!("没有读到选中的文字，这个应用可能不支持划词，可改用截图翻译（{keys}）"),
+                _ => "没有读到选中的文字，这个应用可能不支持划词，可改用截图翻译".to_string(),
+            };
+            (hint, true)
+        }
     }
 }
 
@@ -31,6 +42,9 @@ pub struct SelectionPayload {
     pub id: u64,
     pub text: Option<String>,
     pub error: Option<String>,
+    /// Executable the capture failed in, when the popup may offer to add it
+    /// to the blacklist.
+    pub block_app: Option<String>,
 }
 
 #[derive(Default)]
@@ -60,7 +74,8 @@ fn place(win: &WebviewWindow, anchor: ScreenRect, height: f64) -> bool {
     else {
         return false;
     };
-    let sf = m.scale_factor();
+    // Page CSS pixels -> physical pixels.
+    let sf = m.scale_factor() * text_scale();
     let area = m.work_area();
     let (al, at) = (area.position.x as f64, area.position.y as f64);
     let (ar, ab) = (al + area.size.width as f64, at + area.size.height as f64);
@@ -95,13 +110,19 @@ pub fn show_capture(app: &AppHandle, cap: Capture) {
     let Ok(win) = crate::app::windows::ensure_window(app, LABEL) else { return };
     let state = app.state::<PopupState>();
     let visible = win.is_visible().unwrap_or(false);
-    let error = cap.text.is_none().then(|| unsupported_hint(app));
+    let (text, error, block_app) = match cap.text {
+        Ok(t) => (Some(t), None, None),
+        Err(e) => {
+            let (hint, blame_app) = failure_hint(app, e);
+            (None, Some(hint), cap.app.filter(|_| blame_app))
+        }
+    };
     // Window calls below wait for the main thread, whose focus handler takes
     // this lock: never hold it across them.
     let (payload, place_height) = {
         let mut inner = state.0.lock().unwrap();
         inner.seq += 1;
-        let payload = SelectionPayload { id: inner.seq, error, text: cap.text };
+        let payload = SelectionPayload { id: inner.seq, error, text, block_app };
         inner.last = Some(payload.clone());
         let keep_place = inner.pinned && visible;
         let place_height = (!keep_place).then(|| {
@@ -149,15 +170,23 @@ pub fn popup_set_height(app: AppHandle, state: State<'_, PopupState>, height: f6
         inner.height = height;
         inner.above
     };
-    let (Ok(pos), Ok(size), Ok(sf)) = (win.outer_position(), win.outer_size(), win.scale_factor()) else { return };
+    let (Ok(pos), Ok(outer), Ok(inner), Ok(sf)) =
+        (win.outer_position(), win.outer_size(), win.inner_size(), win.scale_factor())
+    else {
+        return;
+    };
+    let sf = sf * text_scale();
+    // `set_size` takes the inner size; positions are of the outer frame,
+    // which may be larger (invisible resize borders).
     let h = (height * sf).round() as i32;
-    let mut y = if above { pos.y + size.height as i32 - h } else { pos.y };
+    let frame = outer.height as i32 - inner.height as i32;
+    let mut y = if above { pos.y + outer.height as i32 - (h + frame) } else { pos.y };
     if let Ok(Some(m)) = win.current_monitor() {
         let a = m.work_area();
         let (top, bottom) = (a.position.y, a.position.y + a.size.height as i32);
-        y = y.clamp(top, (bottom - h).max(top));
+        y = y.clamp(top, (bottom - h - frame).max(top));
     }
-    let _ = win.set_size(PhysicalSize::new(size.width, h as u32));
+    let _ = win.set_size(PhysicalSize::new(inner.width, h as u32));
     if y != pos.y {
         let _ = win.set_position(PhysicalPosition::new(pos.x, y));
     }
@@ -166,6 +195,18 @@ pub fn popup_set_height(app: AppHandle, state: State<'_, PopupState>, height: f6
 #[tauri::command]
 pub fn popup_set_pinned(state: State<'_, PopupState>, pinned: bool) {
     state.0.lock().unwrap().pinned = pinned;
+}
+
+/// Add an executable to the selection blacklist and close the popup.
+#[tauri::command]
+pub fn popup_block_app(app: AppHandle, state: State<'_, AppState>, exe: String) -> Result<(), String> {
+    state.settings.save(|s| {
+        if !s.selection.blacklist.iter().any(|n| n.eq_ignore_ascii_case(&exe)) {
+            s.selection.blacklist.push(exe);
+        }
+    })?;
+    hide(&app);
+    Ok(())
 }
 
 #[tauri::command]

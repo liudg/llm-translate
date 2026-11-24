@@ -63,6 +63,24 @@ impl Default for HotkeySettings {
     }
 }
 
+/// Current settings format. 2: the selection blacklist gained the default
+/// entries below.
+const VERSION: u32 = 2;
+
+/// Blacklisted out of the box: Android emulators and screen mirrors, where a
+/// drag is touch input to a game or app and the window looks like any other
+/// to the hook (not full-screen, own cursor). Users may remove them.
+pub const DEFAULT_BLACKLIST: [&str; 8] = [
+    "MuMuNxDevice.exe", // MuMu 12
+    "MuMuPlayer.exe",
+    "NemuPlayer.exe", // MuMu 6
+    "dnplayer.exe",   // LDPlayer
+    "HD-Player.exe",  // BlueStacks
+    "Nox.exe",
+    "MEmu.exe",
+    "scrcpy.exe",
+];
+
 /// Selection translation (DESIGN 5.5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -79,14 +97,20 @@ pub struct SelectionSettings {
 
 impl Default for SelectionSettings {
     fn default() -> Self {
-        Self { enabled: true, drag: true, double_click: true, shift_click: true, blacklist: Vec::new() }
+        Self {
+            enabled: true,
+            drag: true,
+            double_click: true,
+            shift_click: true,
+            blacklist: DEFAULT_BLACKLIST.iter().map(|s| s.to_string()).collect(),
+        }
     }
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: VERSION,
             deployed: false,
             model_id: None,
             models_dir: paths::default_models_dir(),
@@ -106,13 +130,37 @@ impl Default for Settings {
 impl Settings {
     pub fn load() -> Self {
         let path = paths::settings_file();
-        match std::fs::read_to_string(&path) {
+        let mut s: Self = match std::fs::read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
                 tracing::warn!("settings.json is invalid ({e}); using defaults");
                 Self::default()
             }),
-            Err(_) => Self::default(),
+            Err(_) => return Self::default(),
+        };
+        if s.migrate()
+            && let Err(e) = s.save()
+        {
+            tracing::warn!("saving migrated settings failed: {e}");
         }
+        s
+    }
+
+    /// Bring settings from an older version up to date, once. Returns
+    /// whether anything changed.
+    fn migrate(&mut self) -> bool {
+        if self.version >= VERSION {
+            return false;
+        }
+        if self.version < 2 {
+            for exe in DEFAULT_BLACKLIST {
+                if !self.selection.blacklist.iter().any(|n| n.eq_ignore_ascii_case(exe)) {
+                    self.selection.blacklist.push(exe.to_string());
+                }
+            }
+        }
+        tracing::info!("settings migrated from version {} to {VERSION}", self.version);
+        self.version = VERSION;
+        true
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -183,5 +231,36 @@ impl SettingsStore {
     /// `update` for commands: the error as UI text.
     pub fn save(&self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
         self.update(f).map(|_| ()).map_err(|e| format!("保存设置失败：{e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v1_gains_default_blacklist_once() {
+        let mut s: Settings =
+            serde_json::from_str(r#"{"version":1,"selection":{"blacklist":["WINWORD.EXE","nox.exe"]}}"#).unwrap();
+        assert!(s.migrate());
+        assert_eq!(s.version, VERSION);
+        let bl = &s.selection.blacklist;
+        assert_eq!(bl[0], "WINWORD.EXE");
+        assert!(bl.iter().any(|n| n == "MuMuNxDevice.exe"));
+        // Already present (any case): not duplicated.
+        assert_eq!(bl.iter().filter(|n| n.eq_ignore_ascii_case("nox.exe")).count(), 1);
+        assert_eq!(bl.len(), 1 + DEFAULT_BLACKLIST.len());
+
+        // Entries the user removes later stay removed.
+        s.selection.blacklist.clear();
+        assert!(!s.migrate());
+        assert!(s.selection.blacklist.is_empty());
+    }
+
+    #[test]
+    fn fresh_settings_include_defaults() {
+        let s = Settings::default();
+        assert_eq!(s.version, VERSION);
+        assert_eq!(s.selection.blacklist.len(), DEFAULT_BLACKLIST.len());
     }
 }

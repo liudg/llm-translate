@@ -50,6 +50,14 @@ body,
   background: #202020;
 }
 
+/* Flyouts (mini / popup) size their window to the content; while a resize is
+   in flight the content may be briefly taller, which must not flash a page
+   scrollbar (it also narrows the layout and makes the text reflow). */
+html:has(.flyout-frame),
+html:has(.flyout-frame) body {
+  overflow: hidden;
+}
+
 /* Crisp 1px inner edge for borderless flyouts (mini / popup) on Win10. */
 :root[data-effect="solid"] .flyout-frame {
   box-shadow: inset 0 0 0 1px var(--stroke);

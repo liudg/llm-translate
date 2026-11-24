@@ -47,6 +47,8 @@ export interface SelectionPayload {
   id: number;
   text: string | null;
   error: string | null;
+  /** Executable the capture failed in, offered for the blacklist. */
+  blockApp: string | null;
 }
 
 export interface AppInfo {
@@ -188,7 +190,10 @@ export interface ShotPayload {
   imageX: number;
   imageY: number;
   toolbar: "below" | "above" | "inside";
+  /** DPI scale of the capture monitor. */
   scale: number;
+  /** Physical pixels per CSS pixel (DPI scale times the Windows text size). */
+  cssScale: number;
 }
 
 /** An OCR paragraph; geometry in image pixels, colours as [r, g, b]. */
@@ -249,6 +254,7 @@ export const api = {
   windowProcesses: () => invoke<WindowProcess[]>("window_processes"),
   popupSetHeight: (height: number) => invoke<void>("popup_set_height", { height }),
   popupSetPinned: (pinned: boolean) => invoke<void>("popup_set_pinned", { pinned }),
+  popupBlockApp: (exe: string) => invoke<void>("popup_block_app", { exe }),
   popupClose: () => invoke<void>("popup_close"),
   popupCurrent: () => invoke<SelectionPayload | null>("popup_current"),
   cancelTranslate: () => invoke<void>("translate_cancel"),

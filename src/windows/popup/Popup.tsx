@@ -105,7 +105,19 @@ export default function Popup() {
       )}
 
       <div className="selectable max-h-[300px] min-h-10 overflow-y-auto border-t border-[var(--stroke)] px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">
-        {payload?.error && <div className="text-sm opacity-75">{payload.error}</div>}
+        {payload?.error && (
+          <div className="text-sm">
+            <p className="opacity-75">{payload.error}</p>
+            {payload.blockApp && (
+              <button
+                onClick={() => api.popupBlockApp(payload.blockApp!)}
+                className="mt-2 rounded px-1.5 py-0.5 -mx-1.5 text-xs text-[var(--accent-text)] hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                不再在 {payload.blockApp} 中显示划词图标
+              </button>
+            )}
+          </div>
+        )}
         <TranslationBody state={state} />
       </div>
 

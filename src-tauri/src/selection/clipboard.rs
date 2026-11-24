@@ -35,7 +35,9 @@ struct Open;
 
 impl Open {
     fn new(owner: Option<HWND>) -> Option<Self> {
-        for _ in 0..20 {
+        // Clipboard managers, Win+V history and copy-on-select terminals
+        // hold it for a moment after every change (up to ~0.5 s measured).
+        for _ in 0..100 {
             if unsafe { OpenClipboard(owner) }.is_ok() {
                 return Some(Open);
             }
@@ -141,7 +143,7 @@ fn read_text(owner: Option<HWND>) -> Option<String> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyError {
     /// Alt still held; injecting would combine with it.
     ModifierHeld,
@@ -158,7 +160,13 @@ pub fn copy_selection(owner: Option<HWND>) -> Result<String, CopyError> {
     if !input::release_modifiers(Duration::from_millis(300)) {
         return Err(CopyError::ModifierHeld);
     }
-    let saved = save(owner).ok_or(CopyError::Busy)?;
+    let Some(saved) = save(owner) else {
+        let exe = unsafe { GetOpenClipboardWindow() }
+            .ok()
+            .and_then(|h| super::blacklist::process_name(super::blacklist::window_pid(h)));
+        tracing::info!("clipboard busy, held open by {}", exe.as_deref().unwrap_or("?"));
+        return Err(CopyError::Busy);
+    };
     let seq0 = unsafe { GetClipboardSequenceNumber() };
     input::send(&[
         input::key(VK_CONTROL, false, false),

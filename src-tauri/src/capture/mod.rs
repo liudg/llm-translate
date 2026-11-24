@@ -51,7 +51,11 @@ pub struct ShotPayload {
     pub image_x: u32,
     pub image_y: u32,
     pub toolbar: ToolbarPlace,
+    /// DPI scale of the capture monitor.
     pub scale: f64,
+    /// Physical pixels per page CSS pixel: `scale` times the Windows text
+    /// size, which WebView2 applies to the page.
+    pub css_scale: f64,
 }
 
 type OcrResult = Option<Result<Vec<Paragraph>, String>>;
@@ -197,9 +201,10 @@ fn session(app: &AppHandle, state: &CaptureState, minimize_main: bool) {
 /// screen position; the toolbar goes below it, else above, else over it.
 fn geometry(id: u64, image: RECT, frame: &screen::Frame) -> (RECT, ShotPayload) {
     let s = frame.scale as f64;
+    let css = s * crate::app::windows::text_scale();
     let (w, h) = (image.right - image.left, image.bottom - image.top);
-    let bar = (TOOLBAR_HEIGHT * s).round() as i32;
-    let win_w = w.max((TOOLBAR_MIN_WIDTH * s).round() as i32);
+    let bar = (TOOLBAR_HEIGHT * css).round() as i32;
+    let win_w = w.max((TOOLBAR_MIN_WIDTH * css).round() as i32);
     let (mut left, mut image_x) = (image.left, 0);
     if left + win_w > frame.rect.right {
         left = image.right - win_w;
@@ -222,6 +227,7 @@ fn geometry(id: u64, image: RECT, frame: &screen::Frame) -> (RECT, ShotPayload) 
         image_y: image_y as u32,
         toolbar,
         scale: s,
+        css_scale: css,
     };
     (window, payload)
 }
