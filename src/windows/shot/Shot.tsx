@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { Check, Copy, Eye, EyeOff, FileText, ImageIcon, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, errorText, events, type ShotParagraph, type ShotPayload } from "../../lib/api";
+import { useCopy } from "../../lib/useCopy";
 import { IconButton, Spinner } from "../../components/ui";
 import { startInferenceSync, useInference } from "../../stores/inference";
 import { drawParagraph } from "./render";
@@ -20,17 +21,6 @@ interface Para extends ShotParagraph {
   result: string;
 }
 
-function useFlag(ms = 1500) {
-  const [on, setOn] = useState(false);
-  const timer = useRef<number>(undefined);
-  const flash = () => {
-    setOn(true);
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setOn(false), ms);
-  };
-  return [on, flash] as const;
-}
-
 export default function Shot() {
   const [shot, setShot] = useState<ShotPayload | null>(null);
   const [paras, setParas] = useState<Para[]>([]);
@@ -38,9 +28,9 @@ export default function Shot() {
   const [error, setError] = useState<string | null>(null);
   const [original, setOriginal] = useState(false);
   const [done, setDone] = useState(0);
-  const [copiedText, flashText] = useFlag();
-  const [copiedSource, flashSource] = useFlag();
-  const [copiedImage, flashImage] = useFlag();
+  const textCopy = useCopy();
+  const sourceCopy = useCopy();
+  const imageCopy = useCopy();
   const status = useInference((s) => s.status);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
@@ -181,33 +171,19 @@ export default function Shot() {
     return () => cancelAnimationFrame(id);
   }, [paras, original, draw, shot]);
 
-  const copyText = async (text: string, flash: () => void) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      flash();
-    } catch (e) {
-      console.error("copy failed", e);
-    }
-  };
-
   const translations = paras.filter((p) => p.translatable && p.result.trim()).map((p) => p.result.trim());
   const sources = paras.map((p) => p.text);
   const copyTranslation = () => {
     // Ctrl+C also lands here: never overwrite the clipboard with nothing.
-    if (translations.length > 0) copyText(translations.join("\n"), flashText);
+    if (translations.length > 0) textCopy.copy(translations.join("\n"));
   };
-  const copySource = () => copyText(sources.join("\n"), flashSource);
-  const copyImage = async () => {
+  const copySource = () => sourceCopy.copy(sources.join("\n"));
+  const copyImage = () => {
     const c = canvasRef.current;
     const ctx = c?.getContext("2d");
     if (!c || !ctx) return;
     const data = ctx.getImageData(0, 0, c.width, c.height);
-    try {
-      await api.shotCopyImage(new Uint8Array(data.data.buffer), c.width, c.height);
-      flashImage();
-    } catch (e) {
-      console.error("copy image failed", e);
-    }
+    imageCopy.copy(() => api.shotCopyImage(new Uint8Array(data.data.buffer), c.width, c.height));
   };
 
   const keyRef = useRef({ copyTranslation, close: () => api.shotClose() });
@@ -289,13 +265,13 @@ export default function Shot() {
           {original ? <EyeOff className="size-4 text-[var(--accent-text)]" /> : <Eye className="size-4" />}
         </IconButton>
         <IconButton title="复制全部译文（Ctrl+C）" onClick={copyTranslation} disabled={translations.length === 0}>
-          {copiedText ? <Check className="size-4" /> : <Copy className="size-4" />}
+          {textCopy.copied ? <Check className="size-4" /> : <Copy className="size-4" />}
         </IconButton>
         <IconButton title="复制原文" onClick={copySource} disabled={sources.length === 0}>
-          {copiedSource ? <Check className="size-4" /> : <FileText className="size-4" />}
+          {sourceCopy.copied ? <Check className="size-4" /> : <FileText className="size-4" />}
         </IconButton>
         <IconButton title={original ? "复制原图" : "复制译图"} onClick={copyImage}>
-          {copiedImage ? <Check className="size-4" /> : <ImageIcon className="size-4" />}
+          {imageCopy.copied ? <Check className="size-4" /> : <ImageIcon className="size-4" />}
         </IconButton>
         <IconButton title="关闭（Esc）" onClick={() => api.shotClose()}>
           <X className="size-4" />

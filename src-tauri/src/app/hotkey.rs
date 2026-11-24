@@ -293,9 +293,9 @@ pub fn set(app: &AppHandle, id: &str, keys: Option<String>) -> Result<(), String
     }
     tracing::info!("shortcut {id} = {keys:?}");
     let state = app.state::<AppState>();
-    let saved = state.settings.update(|s| set_field(&mut s.hotkeys, id, keys.clone()));
+    let saved = state.settings.save(|s| set_field(&mut s.hotkeys, id, keys.clone()));
     publish(app);
-    saved.map(|_| ()).map_err(|e| format!("保存设置失败：{e}"))
+    saved
 }
 
 #[tauri::command]

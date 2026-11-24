@@ -13,10 +13,10 @@ import {
   type Theme,
   type WindowProcess,
 } from "../../lib/api";
-import { bytes, mbToGb } from "../../lib/format";
+import { mbToGb } from "../../lib/format";
 import { Badge, Button, Progress, Segmented, Select, Spinner, Toggle } from "../../components/ui";
 import { useSettings } from "../../stores/settings";
-import { useUpdater } from "../../stores/updater";
+import { downloadProgress, useUpdater } from "../../stores/updater";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { ModelList } from "./ModelList";
 const IDLE_CHOICES = [0, 5, 10, 30, 60];
@@ -378,7 +378,7 @@ function AboutVersionRow({ info }: { info: AppInfo | null }) {
   const downloading = snapshot.phase === "downloading";
   const installing = snapshot.phase === "installing";
   const prog = snapshot.progress;
-  const ratio = prog?.total ? prog.downloaded / prog.total : 0;
+  const { ratio, text: progressText } = downloadProgress(prog);
 
   let statusHint: ReactNode = null;
   if (snapshot.phase === "upToDate" && snapshot.manual) {
@@ -388,12 +388,7 @@ function AboutVersionRow({ info }: { info: AppInfo | null }) {
   } else if (downloading) {
     statusHint = (
       <span>
-        正在下载 v{avail?.version}…{" "}
-        {prog?.total
-          ? `${Math.min(100, Math.round(ratio * 100))}%（${bytes(prog.downloaded)} / ${bytes(prog.total)}）`
-          : prog
-            ? bytes(prog.downloaded)
-            : ""}
+        正在下载 v{avail?.version}… {progressText}
       </span>
     );
   } else if (installing) {

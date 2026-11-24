@@ -2,11 +2,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, Download, Languages, Settings as SettingsIcon, X } from "lucide-react";
 import { api, events, type HotkeyInfo } from "../../lib/api";
-import { bytes } from "../../lib/format";
 import { Button, Progress, Spinner } from "../../components/ui";
 import { startInferenceSync, useInference } from "../../stores/inference";
 import { useSettings } from "../../stores/settings";
-import { startUpdaterSync, useUpdater } from "../../stores/updater";
+import { downloadProgress, startUpdaterSync, useUpdater } from "../../stores/updater";
 import TranslatePage from "./TranslatePage";
 import SettingsPage from "./SettingsPage";
 
@@ -70,7 +69,7 @@ function UpdateBanner() {
   const isInstalling = snapshot.phase === "installing";
   const isError = snapshot.phase === "error";
   const prog = snapshot.progress;
-  const ratio = prog?.total ? prog.downloaded / prog.total : 0;
+  const { ratio, text: progressText } = downloadProgress(prog);
 
   return (
     <div
@@ -92,12 +91,7 @@ function UpdateBanner() {
         <div className="min-w-0 flex-1">
           {isDownloading && (
             <span>
-              正在下载新版本 v{avail.version}…{" "}
-              {prog?.total
-                ? `${Math.min(100, Math.round(ratio * 100))}%（${bytes(prog.downloaded)} / ${bytes(prog.total)}）`
-                : prog
-                  ? bytes(prog.downloaded)
-                  : ""}
+              正在下载新版本 v{avail.version}… {progressText}
             </span>
           )}
           {isInstalling && <span>正在安装 v{avail.version}，完成后将自动重启…</span>}

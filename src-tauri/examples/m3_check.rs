@@ -254,15 +254,15 @@ fn run_case(c: &Case, e2e: bool, uia: &Uia) -> bool {
             }
         }
     } else {
-        let (text, method) = selection::capture_text(Some(uia), None);
-        println!("  capture: {:?} {:?}", method, text.as_deref().map(preview));
+        let text = selection::capture_text(Some(uia), None);
+        println!("  capture: {:?}", text.as_deref().map(preview));
         ok &= text.is_some();
         // Same selection through the Ctrl+Insert fallback only; the user's
         // clipboard must come back unchanged.
         let ps = |cmd: &str| Command::new("powershell").args(["-NoProfile", "-Command", cmd]).output().unwrap();
         ps("Set-Clipboard -Value 'm3-clipboard-marker'");
-        let (text, method) = selection::capture_text(None, None);
-        println!("  capture without UIA: {:?} {:?}", method, text.as_deref().map(preview));
+        let text = selection::capture_text(None, None);
+        println!("  capture without UIA: {:?}", text.as_deref().map(preview));
         ok &= text.is_some();
         let clip = String::from_utf8_lossy(&ps("Get-Clipboard").stdout).trim().to_string();
         println!("  clipboard restored: {}", clip == "m3-clipboard-marker");

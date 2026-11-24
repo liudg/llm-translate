@@ -26,6 +26,8 @@ pub struct AppState {
     pub translator: Arc<Translator>,
     pub downloads: Mutex<HashMap<String, ActiveDownload>>,
     pub http: reqwest::Client,
+    /// Held by whatever changes which model runs (see `deploy::wizard`).
+    pub deploy: tokio::sync::Mutex<()>,
 }
 
 impl AppState {

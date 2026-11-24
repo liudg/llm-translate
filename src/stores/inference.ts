@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, events, type InferenceNotice, type InferenceStatus } from "../lib/api";
+import { follow, once } from "../lib/sync";
 
 interface InferenceStore {
   status: InferenceStatus;
@@ -13,20 +14,8 @@ export const useInference = create<InferenceStore>((set) => ({
   dismissNotice: () => set({ notice: null }),
 }));
 
-let started = false;
-
 /** Subscribe once per window to backend status events. */
-export function startInferenceSync() {
-  if (started) return;
-  started = true;
-  // Subscribe first; the snapshot only applies if no newer event came in.
-  let gotEvent = false;
-  events.status((status) => {
-    gotEvent = true;
-    useInference.setState({ status });
-  });
-  api.inferenceStatus().then((status) => {
-    if (!gotEvent) useInference.setState({ status });
-  });
+export const startInferenceSync = once(() => {
+  follow(events.status, api.inferenceStatus, (status) => useInference.setState({ status }));
   events.notice((notice) => useInference.setState({ notice }));
-}
+});

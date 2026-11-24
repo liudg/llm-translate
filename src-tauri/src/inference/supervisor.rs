@@ -6,7 +6,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -100,20 +100,9 @@ struct State {
     /// Bumped on every intentional stop/start so stale monitors can tell.
     generation: u64,
     crashes: u32,
-    /// Who configured `spec`: a new number on every `configure` /
-    /// `configure_if`, kept by crash restarts and the CPU fallback. A launch
-    /// rolls back only what it still owns, even if a newer launch happened
-    /// to configure an identical spec.
-    owner: u64,
-}
-
-/// A process `start_owned` handed out.
-pub struct Started {
-    pub port: u16,
-    /// For `is_live`: the port means nothing once this process is replaced.
-    pub generation: u64,
-    /// What it actually runs (a CPU fallback may differ from the request).
-    pub spec: LaunchSpec,
+    /// When `ensure_ready` last gave up, and why: callers that queued behind
+    /// that attempt get its answer instead of another round of retries.
+    last_failure: Option<(Instant, String)>,
 }
 
 pub struct Supervisor {
@@ -121,8 +110,6 @@ pub struct Supervisor {
     /// Copy of `State::spec` readable without waiting for a model load that
     /// holds `state` (translation requests must stay cancellable meanwhile).
     spec: Mutex<Option<LaunchSpec>>,
-    /// Copy of `State::owner`, readable without the lock.
-    owner: AtomicU64,
     status: watch::Sender<Status>,
     last_used: Mutex<Instant>,
     idle_minutes: AtomicU32,
@@ -139,7 +126,7 @@ fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
-        if c == '' {
+        if c == '\u{1b}' {
             if chars.clone().next() == Some('[') {
                 chars.next();
                 for c in chars.by_ref() {
@@ -155,29 +142,33 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
+/// The last three error lines of the log, else its last three lines.
 fn log_tail(path: &PathBuf) -> String {
     let text = std::fs::read(path).map(|b| strip_ansi(&String::from_utf8_lossy(&b))).unwrap_or_default();
-    let lines: Vec<&str> = text
-        .lines()
+    let all: Vec<&str> = text.lines().collect();
+    let errors: Vec<&str> = all
+        .iter()
+        .copied()
         .filter(|l| {
             let l = l.to_ascii_lowercase();
             l.contains("error") || l.contains("failed") || l.contains("exception")
         })
         .collect();
-    let picked = if lines.is_empty() {
-        text.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>()
-    } else {
-        lines.into_iter().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect()
-    };
-    picked.join("\n")
+    let picked = if errors.is_empty() { all } else { errors };
+    picked[picked.len().saturating_sub(3)..].join("\n")
 }
 
 impl Supervisor {
     pub fn new(on_notice: NoticeFn) -> Arc<Self> {
         let sup = Arc::new(Self {
-            state: tokio::sync::Mutex::new(State { spec: None, running: None, generation: 0, crashes: 0, owner: 0 }),
+            state: tokio::sync::Mutex::new(State {
+                spec: None,
+                running: None,
+                generation: 0,
+                crashes: 0,
+                last_failure: None,
+            }),
             spec: Mutex::new(None),
-            owner: AtomicU64::new(0),
             status: watch::channel(Status::Unconfigured).0,
             last_used: Mutex::new(Instant::now()),
             idle_minutes: AtomicU32::new(0),
@@ -220,71 +211,34 @@ impl Supervisor {
         msg
     }
 
-    /// Who configured the current spec (see `State::owner`).
-    pub fn owner(&self) -> u64 {
-        self.owner.load(Ordering::SeqCst)
+    /// Set what to run. Stops a running server whose spec differs.
+    pub async fn configure(&self, spec: LaunchSpec) {
+        self.configure_with(|| Some(spec)).await;
     }
 
-    /// Set what to run and take ownership of it; returns the new owner.
-    /// Stops a running server whose spec differs.
-    pub async fn configure(&self, spec: LaunchSpec) -> u64 {
+    /// `configure` with the spec made under the lock, e.g. from settings: the
+    /// CPU fallback saves its settings while holding the lock, so a spec read
+    /// here never undoes a fallback that just happened. `None` changes
+    /// nothing; returns whether a spec was set.
+    pub async fn configure_with(&self, spec: impl FnOnce() -> Option<LaunchSpec>) -> bool {
         let mut st = self.state.lock().await;
-        self.set_spec_locked(&mut st, spec, false).await
-    }
-
-    /// `configure`, but only if `owner` still owns the spec: nobody (a model
-    /// switch, the wizard, new settings) took over meanwhile. `restart` stops
-    /// the process even when `spec` equals the current one (e.g. a candidate
-    /// that failed its self-test, so a retry starts it afresh).
-    pub async fn configure_if(&self, owner: u64, spec: LaunchSpec, restart: bool) -> Option<u64> {
-        self.configure_if_with(owner, restart, || Some(spec)).await
-    }
-
-    /// `configure_if` with the spec made under the lock, e.g. from settings:
-    /// the CPU fallback saves its settings while holding the lock, so a spec
-    /// read here can never undo a fallback that just happened.
-    pub async fn configure_if_with(
-        &self,
-        owner: u64,
-        restart: bool,
-        spec: impl FnOnce() -> Option<LaunchSpec>,
-    ) -> Option<u64> {
-        let mut st = self.state.lock().await;
-        if st.owner != owner {
-            return None;
-        }
-        let spec = spec()?;
-        Some(self.set_spec_locked(&mut st, spec, restart).await)
-    }
-
-    async fn set_spec_locked(&self, st: &mut State, spec: LaunchSpec, restart: bool) -> u64 {
-        if restart || st.spec.as_ref() != Some(&spec) {
-            Self::stop_locked(st).await;
+        let Some(spec) = spec() else { return false };
+        if st.spec.as_ref() != Some(&spec) {
+            Self::stop_locked(&mut st).await;
             *self.spec.lock().unwrap() = Some(spec.clone());
             st.spec = Some(spec);
             st.crashes = 0;
+            st.last_failure = None;
             self.status.send_replace(Status::Stopped);
         }
-        st.owner += 1;
-        self.owner.store(st.owner, Ordering::SeqCst);
-        st.owner
+        true
     }
 
     pub async fn stop(&self) {
         let mut st = self.state.lock().await;
-        self.stop_reporting(&mut st).await;
-    }
-
-    /// `stop`, but only if `owner` still owns the spec.
-    pub async fn stop_if(&self, owner: u64) {
-        let mut st = self.state.lock().await;
-        if st.owner == owner {
-            self.stop_reporting(&mut st).await;
-        }
-    }
-
-    async fn stop_reporting(&self, st: &mut State) {
-        Self::stop_locked(st).await;
+        // An intentional stop: whoever asks next gets a fresh start.
+        st.last_failure = None;
+        Self::stop_locked(&mut st).await;
         if st.spec.is_some() {
             self.status.send_replace(Status::Stopped);
         }
@@ -299,30 +253,16 @@ impl Supervisor {
         }
     }
 
-    /// Start (once) with the configured spec and wait until healthy. No fallback.
-    pub async fn start(self: &Arc<Self>) -> Result<u16, String> {
+    /// Start (once) with the configured spec and wait until healthy. No
+    /// retries or fallback of its own. Returns the port and the spec actually
+    /// running: a request's CPU fallback may have changed the configured one.
+    pub async fn start(self: &Arc<Self>) -> Result<(u16, LaunchSpec), String> {
         let mut st = self.state.lock().await;
-        if let (Some(_), Status::Ready { port, .. }) = (&st.running, self.status()) {
-            return Ok(port);
-        }
-        self.start_locked(&mut st).await
-    }
-
-    /// `start`, but only while `owner` still owns the spec (checked under the
-    /// lock, so the process cannot be someone else's). Returns the port and
-    /// the spec actually running, which a concurrent request's CPU fallback
-    /// may have changed from the configured one.
-    pub async fn start_owned(self: &Arc<Self>, owner: u64) -> Result<Started, String> {
-        let mut st = self.state.lock().await;
-        if st.owner != owner {
-            return Err("模型已被其他操作切换，本次启动已中止".into());
-        }
         let port = match (&st.running, self.status()) {
             (Some(_), Status::Ready { port, .. }) => port,
             _ => self.start_locked(&mut st).await?,
         };
-        let spec = st.spec.clone().ok_or("尚未部署模型")?;
-        Ok(Started { port, generation: st.generation, spec })
+        Ok((port, st.spec.clone().ok_or("尚未部署模型")?))
     }
 
     async fn start_locked(self: &Arc<Self>, st: &mut State) -> Result<u16, String> {
@@ -415,26 +355,23 @@ impl Supervisor {
 
     /// Port of a ready server, starting it (with retries and CPU fallback) if needed.
     pub async fn ensure_ready(self: &Arc<Self>) -> Result<u16, String> {
-        self.ensure_ready_live().await.map(|(port, _)| port)
-    }
-
-    /// Like `ensure_ready`, plus the generation of the process behind the
-    /// port, for `is_live` (the port is stale once that process is replaced).
-    pub async fn ensure_ready_live(self: &Arc<Self>) -> Result<(u16, u64), String> {
         self.touch();
+        let called = Instant::now();
         let mut st = self.state.lock().await;
         if let (Some(_), Status::Ready { port, .. }) = (&st.running, self.status()) {
-            return Ok((port, st.generation));
+            return Ok(port);
         }
-        let port = self.recover_locked(&mut st, 0).await?;
-        Ok((port, st.generation))
-    }
-
-    /// The process `ensure_ready_live` returned with `generation` still runs.
-    /// Waits for a stop / start in progress, so a replaced process is seen.
-    pub async fn is_live(&self, generation: u64) -> bool {
-        let st = self.state.lock().await;
-        st.generation == generation && st.running.is_some()
+        // Waited for an attempt that just gave up: same answer, no new round.
+        if let Some((at, e)) = &st.last_failure
+            && *at > called
+        {
+            return Err(e.clone());
+        }
+        let r = self.recover_locked(&mut st, 0).await;
+        if let Err(e) = &r {
+            st.last_failure = Some((Instant::now(), e.clone()));
+        }
+        r
     }
 
     /// Start attempts `first..=MAX_RESTARTS` with backoff (none before the
@@ -532,15 +469,8 @@ impl Supervisor {
     }
 
     async fn check_idle(self: &Arc<Self>) {
-        let minutes = self.idle_minutes.load(Ordering::Relaxed);
-        if minutes == 0 || !matches!(self.status(), Status::Ready { .. }) {
-            return;
-        }
-        if self.last_used.lock().unwrap().elapsed() < Duration::from_secs(minutes as u64 * 60) {
-            return;
-        }
+        // Under the lock: a request may be starting or using the model.
         let mut st = self.state.lock().await;
-        // A request may have started the model or used it while we waited.
         let minutes = self.idle_minutes.load(Ordering::Relaxed);
         if minutes == 0
             || !matches!(self.status(), Status::Ready { .. })
@@ -593,36 +523,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// A launch rolls back only what it still owns, even when a newer launch
-    /// configured an identical spec.
+    /// Callers queued behind a failed `ensure_ready` get its error without
+    /// another round of retries.
     #[tokio::test]
-    async fn rollback_needs_ownership_not_an_equal_spec() {
-        let spec = |id: &str| LaunchSpec {
-            exe: PathBuf::from("llama-server.exe"),
+    async fn queued_callers_share_a_failure() {
+        let sup = Supervisor::new(Arc::new(|_| {}));
+        sup.configure(LaunchSpec {
+            exe: PathBuf::from("does-not-exist.exe"),
             model_path: PathBuf::from("model.gguf"),
-            model_id: id.into(),
+            model_id: "test".into(),
             backend: Backend::Cpu,
             device: None,
             threads: 1,
             ctx: 512,
             log_path: PathBuf::from("server.log"),
+        })
+        .await;
+        let held = sup.state.lock().await;
+        let before = held.generation;
+        let call = || {
+            let sup = sup.clone();
+            tokio::spawn(async move { sup.ensure_ready().await })
         };
-        let sup = Supervisor::new(Arc::new(|_| {}));
-        let old = sup.configure(spec("cand")).await;
-        let newer = sup.configure(spec("cand")).await; // same spec, new launch
-        assert_ne!(old, newer);
-        assert_eq!(sup.configure_if(old, spec("saved"), true).await, None);
-        assert_eq!(sup.spec().unwrap().model_id, "cand");
-        sup.stop_if(old).await; // no-op for a stale owner
-        let restored = sup.configure_if(newer, spec("saved"), true).await;
-        assert!(restored.is_some_and(|o| o == sup.owner()));
-        assert_eq!(sup.spec().unwrap().model_id, "saved");
+        let (a, b) = (call(), call());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(held);
+        let (a, b) = (a.await.unwrap().unwrap_err(), b.await.unwrap().unwrap_err());
+        assert!(a.starts_with("找不到推理程序"), "{a}");
+        assert_eq!(a, b);
+        // One start attempt in all (each bumps the generation once).
+        assert_eq!(sup.state.lock().await.generation, before + 1);
     }
 
     #[test]
     fn strips_ansi() {
         assert_eq!(
-            super::strip_ansi("[34m0.00.356[0m [31mE failed to load[0m"),
+            super::strip_ansi("\u{1b}[34m0.00.356\u{1b}[0m \u{1b}[31mE failed to load\u{1b}[0m"),
             "0.00.356 E failed to load"
         );
     }

@@ -1,7 +1,7 @@
 //! Window helpers: theme, backdrop effects, showing the main and mini windows,
 //! remembering the main window's placement.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -22,19 +22,16 @@ const LABELS: [&str; 5] = ["main", "wizard", "mini", "popup", "shot"];
 const BACKDROP_LABELS: [&str; 4] = ["main", "wizard", "mini", "popup"];
 
 /// OS build cached at startup so lazy-created windows pick the same backdrop.
-static OS_BUILD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-/// True on Windows 10 (build < 22000), where Mica is unavailable and Win10
-/// Acrylic causes severe drag/resize lag, so windows use a solid Fluent fill.
-static USE_SOLID: AtomicBool = AtomicBool::new(false);
+static OS_BUILD: AtomicU32 = AtomicU32::new(0);
 
 /// Fluent solid backing colours for Win10 (must match `src/index.css`).
 const SOLID_LIGHT: Color = Color(0xf3, 0xf3, 0xf3, 0xff);
 const SOLID_DARK: Color = Color(0x20, 0x20, 0x20, 0xff);
 
-/// Win11 (build >= 22000) -> Mica; Win10 (build < 22000) -> solid Fluent fill
-/// to avoid Win10 Acrylic drag/resize lag (DESIGN 2 / 8).
-pub fn pick_effect(build: u32) -> (Option<Effect>, &'static str) {
-    if build >= 22000 { (Some(Effect::Mica), "Mica") } else { (None, "纯色") }
+/// Win11 (build >= 22000) -> Mica; Win10 has no Mica and its Acrylic lags
+/// badly on drag/resize, so it gets a solid Fluent fill (DESIGN 2 / 8).
+pub fn uses_mica(build: u32) -> bool {
+    build >= 22000
 }
 
 /// Whether Windows is currently set to dark app mode (Win10 1607+ / Win11).
@@ -76,14 +73,13 @@ pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindo
         .find(|w| w.label == label)
         .ok_or_else(|| tauri::Error::WebviewNotFound)?;
     let theme = app.state::<crate::state::AppState>().settings.get().theme;
-    let (effect, _) = pick_effect(OS_BUILD.load(Ordering::Relaxed));
     let builder = WebviewWindowBuilder::from_config(app, cfg)?;
     // The screenshot result window must show the image exactly, with
     // see-through margins: no backdrop.
     let builder = if cfg.label == crate::capture::LABEL {
         builder
-    } else if let Some(eff) = effect {
-        builder.effects(EffectsBuilder::new().effect(eff).build())
+    } else if uses_mica(OS_BUILD.load(Ordering::Relaxed)) {
+        builder.effects(EffectsBuilder::new().effect(Effect::Mica).build())
     } else {
         // Win10 solid fallback: disable transparency for crisp shadows and
         // fast composition, set the WebView2 backing colour, and flag the
@@ -113,8 +109,6 @@ pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindo
 /// startup only creates `wizard`.
 pub fn create_startup(app: &AppHandle, build: u32, deployed: bool) -> tauri::Result<()> {
     OS_BUILD.store(build, Ordering::Relaxed);
-    let (effect, _) = pick_effect(build);
-    USE_SOLID.store(effect.is_none(), Ordering::Relaxed);
     let initial: &[&str] = if deployed { &["main", "mini", "popup"] } else { &["wizard"] };
     for label in initial {
         ensure_window(app, label)?;
@@ -126,7 +120,7 @@ pub fn create_startup(app: &AppHandle, build: u32, deployed: bool) -> tauri::Res
 /// The page itself follows the `settings-changed` event, see `src/lib/theme.ts`.
 pub fn apply_theme(app: &AppHandle, theme: Theme) {
     let t = tauri_theme(theme);
-    let solid = USE_SOLID.load(Ordering::Relaxed).then(|| solid_color(theme));
+    let solid = (!uses_mica(OS_BUILD.load(Ordering::Relaxed))).then(|| solid_color(theme));
     for label in LABELS {
         if let Some(win) = app.get_webview_window(label) {
             let _ = win.set_theme(t);
@@ -157,8 +151,6 @@ pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("wizard") {
         // Every way out of the wizard (close button, finish, tray menu) lands
         // here: pause its downloads and bring the saved model back.
-        // Hidden first: `deploy_launch` checks visibility after flagging
-        // itself, which keeps a launch and this close from both proceeding.
         let was_visible = w.is_visible().unwrap_or(false);
         let _ = w.hide();
         if was_visible {
@@ -305,10 +297,10 @@ mod tests {
 
     #[test]
     fn win10_uses_solid_and_win11_uses_mica() {
-        assert_eq!(pick_effect(17763), (None, "纯色")); // Win10 1809
-        assert_eq!(pick_effect(19045), (None, "纯色")); // Win10 22H2
-        assert_eq!(pick_effect(21999), (None, "纯色"));
-        assert_eq!(pick_effect(22000), (Some(Effect::Mica), "Mica")); // Win11 21H2
-        assert_eq!(pick_effect(26200), (Some(Effect::Mica), "Mica")); // Win11 24H2+
+        assert!(!uses_mica(17763)); // Win10 1809
+        assert!(!uses_mica(19045)); // Win10 22H2
+        assert!(!uses_mica(21999));
+        assert!(uses_mica(22000)); // Win11 21H2
+        assert!(uses_mica(26200)); // Win11 24H2+
     }
 }

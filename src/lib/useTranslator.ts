@@ -6,6 +6,8 @@ export type DirChoice = "auto" | Direction;
 
 export const DIR_LABEL: Record<Direction, string> = { zh2En: "中文 → 英语", en2Zh: "英语 → 中文" };
 export const DIR_SHORT: Record<DirChoice, string> = { auto: "自动", zh2En: "中 → 英", en2Zh: "英 → 中" };
+/** Order of the direction toggle in the mini window and the popup. */
+export const NEXT_CHOICE: Record<DirChoice, DirChoice> = { auto: "zh2En", zh2En: "en2Zh", en2Zh: "auto" };
 
 export interface TranslatorState {
   /** Text and direction of the latest request. */
@@ -88,9 +90,15 @@ export function useTranslator() {
   return { state, run, stop, clear };
 }
 
-/** Footer label for the direction a request used. */
-export function directionText(s: TranslatorState): string | null {
-  if (!s.direction) return null;
-  if (s.choice !== "auto") return DIR_LABEL[s.direction];
-  return s.mixed ? "自动 · 中英混合，逐段翻译" : `自动 · ${DIR_LABEL[s.direction]}`;
+/** Footer label: the direction a request used and how long it took. */
+export function footerText(s: TranslatorState): string {
+  if (!s.direction) return "";
+  const dir =
+    s.choice !== "auto"
+      ? DIR_LABEL[s.direction]
+      : s.mixed
+        ? "自动 · 中英混合，逐段翻译"
+        : `自动 · ${DIR_LABEL[s.direction]}`;
+  // Under 10 ms nothing was translated (copied through): no time.
+  return s.elapsedMs !== null && s.elapsedMs >= 10 ? `${dir} · ${(s.elapsedMs / 1000).toFixed(2)} 秒` : dir;
 }

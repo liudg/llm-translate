@@ -19,8 +19,6 @@ pub struct Paragraph {
     pub rect: [f32; 4],
     /// Average OCR box height of its lines.
     pub line_height: f32,
-    /// Distance between line tops (line height for a single line).
-    pub line_pitch: f32,
     pub lines: usize,
     pub text: String,
     /// Contains letters in either language, so it goes to the model; others
@@ -117,13 +115,11 @@ pub fn paragraphs(mut lines: Vec<Line>, bgra: &[u8], width: u32, height: u32) ->
             let (x0, y0, x1, y1) = g.bounds();
             let n = g.lines.len();
             let line_height = g.avg_height();
-            let line_pitch = if n > 1 { (g.lines[n - 1].y0 - g.lines[0].y0) / (n - 1) as f32 } else { line_height };
             let text = g.text();
             let (bg, fg) = img.colors(x0, y0, x1, y1);
             Paragraph {
                 rect: [x0, y0, x1 - x0, y1 - y0],
                 line_height,
-                line_pitch,
                 lines: n,
                 translatable: detect_paragraph(&text).is_some(),
                 text,
@@ -298,7 +294,6 @@ mod tests {
         Paragraph {
             rect: [x, y, 50.0, 20.0],
             line_height: 20.0,
-            line_pitch: 20.0,
             lines: 1,
             text: text.into(),
             translatable: true,

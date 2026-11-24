@@ -28,28 +28,12 @@ pub struct ScreenRect {
     pub bottom: i32,
 }
 
-/// One icon click.
-#[derive(Debug, Clone, Copy)]
-pub struct Job {
-    /// Bounding box of the gesture's press and release points.
-    pub anchor: ScreenRect,
-    /// Clipboard owner window (the icon window).
-    pub owner: isize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Method {
-    Uia,
-    CtrlInsert,
-}
-
 #[derive(Debug, Clone)]
 pub struct Capture {
+    /// Bounding box of the gesture's press and release points.
     pub anchor: ScreenRect,
     /// `None`: neither UIA nor Ctrl+Insert produced text.
     pub text: Option<String>,
-    pub method: Option<Method>,
 }
 
 pub struct Selection {
@@ -68,13 +52,13 @@ fn to_config(s: &SelectionSettings) -> hook::Config {
 
 /// Capture the selected text of the focused control: UIA first, then
 /// Ctrl+Insert. `owner` is the clipboard owner window.
-pub fn capture_text(uia: Option<&uia::Uia>, owner: Option<HWND>) -> (Option<String>, Option<Method>) {
+pub fn capture_text(uia: Option<&uia::Uia>, owner: Option<HWND>) -> Option<String> {
     let t0 = Instant::now();
     if let Some(u) = uia {
         match u.selection() {
             Ok(s) if !s.trim().is_empty() => {
                 tracing::info!("selection via UIA: {} chars in {} ms", s.chars().count(), t0.elapsed().as_millis());
-                return (Some(s), Some(Method::Uia));
+                return Some(s);
             }
             Ok(_) => tracing::debug!("UIA: no selection"),
             Err(e) => tracing::debug!("UIA failed: {e}"),
@@ -90,11 +74,11 @@ pub fn capture_text(uia: Option<&uia::Uia>, owner: Option<HWND>) -> (Option<Stri
                 t1.elapsed().as_millis(),
                 (t1 - t0).as_millis()
             );
-            (Some(s), Some(Method::CtrlInsert))
+            Some(s)
         }
         Err(e) => {
             tracing::info!("selection capture failed: {e:?} after {} ms", t0.elapsed().as_millis());
-            (None, None)
+            None
         }
     }
 }
@@ -109,18 +93,19 @@ impl Selection {
             tracing::warn!("selection hook accepts injected input (test mode)");
             hook::ACCEPT_INJECTED.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        let (tx, rx) = channel::<Job>();
+        let (tx, rx) = channel::<ScreenRect>();
+        // The icon window's thread pumps messages, so it can own the clipboard.
+        let owner = hook::spawn(cfg.clone(), tx)?;
         std::thread::Builder::new().name("selection-capture".into()).spawn(move || {
             unsafe {
                 let _ = CoInitializeEx(None, COINIT_MULTITHREADED).ok();
             }
             let uia = uia::Uia::new().map_err(|e| tracing::error!("UI Automation unavailable: {e}")).ok();
-            for job in rx {
-                let (text, method) = capture_text(uia.as_ref(), Some(HWND(job.owner as *mut _)));
-                on_capture(Capture { anchor: job.anchor, text, method });
+            for anchor in rx {
+                let text = capture_text(uia.as_ref(), Some(HWND(owner as *mut _)));
+                on_capture(Capture { anchor, text });
             }
         })?;
-        hook::spawn(cfg.clone(), tx)?;
         Ok(Self { cfg })
     }
 

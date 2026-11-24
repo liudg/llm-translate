@@ -25,8 +25,6 @@ pub struct GpuDevice {
     pub name: String,
     pub total_mb: u64,
     pub free_mb: u64,
-    /// Dedicated VRAM reported by DXGI for the matching adapter, if found.
-    pub dedicated_mb: Option<u64>,
     /// Integrated GPU (DXGI dedicated memory < 1 GiB): uses shared system RAM.
     pub integrated: bool,
 }
@@ -80,7 +78,6 @@ pub fn parse_list_devices(out: &str) -> Vec<GpuDevice> {
                 name,
                 total_mb,
                 free_mb,
-                dedicated_mb: None,
                 integrated: false,
             })
         })
@@ -119,7 +116,6 @@ fn annotate_with_dxgi(gpus: &mut [GpuDevice], adapters: &[(String, u64)]) {
             let an = norm(n);
             !an.is_empty() && (an.contains(&gn) || gn.contains(&an))
         }) {
-            g.dedicated_mb = Some(*mb);
             g.integrated = *mb < 1024;
         }
     }
@@ -271,7 +267,6 @@ mod tests {
             name: id.into(),
             total_mb: free_mb,
             free_mb,
-            dedicated_mb: None,
             integrated,
         }
     }

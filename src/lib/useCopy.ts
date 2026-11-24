@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
 
-/** Copy text and flag `copied` for 1.5 s. */
+/** Copy text (or run another copy action) and flag `copied` for 1.5 s. */
 export function useCopy() {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number>(undefined);
-  const copy = async (text: string) => {
+  const copy = async (what: string | (() => Promise<unknown>)) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await (typeof what === "string" ? navigator.clipboard.writeText(what) : what());
     } catch (e) {
       console.error("copy failed", e);
       return;

@@ -94,6 +94,7 @@ fn build_state(app: &AppHandle) -> anyhow::Result<AppState> {
         translator,
         downloads: Mutex::new(HashMap::new()),
         http: deploy::downloader::client(),
+        deploy: tokio::sync::Mutex::new(()),
     })
 }
 
@@ -169,7 +170,6 @@ pub fn run() {
             app::tray::open_primary(app);
         }))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(app::hotkey::plugin())
@@ -183,7 +183,6 @@ pub fn run() {
                 app::settings::sync_models_dir_registry(&settings.models_dir);
             }
             let spec = state.spec_from_settings(&settings);
-            let sup = state.sup.clone();
             let handle = app.handle().clone();
             let selection = Selection::start(&settings.selection, move |cap| {
                 if app::tray::deployed(&handle) {
@@ -205,7 +204,7 @@ pub fn run() {
             app.manage(AppInfo {
                 version: env!("CARGO_PKG_VERSION"),
                 os_build: build,
-                effect: windows::pick_effect(build).1,
+                effect: if windows::uses_mica(build) { "Mica" } else { "纯色" },
                 config_dir: paths::config_dir(),
                 logs_dir: paths::logs_dir(),
             });
@@ -222,9 +221,15 @@ pub fn run() {
                     if !minimized {
                         show_main(app.handle());
                     }
+                    let handle = app.handle().clone();
                     tauri::async_runtime::spawn(async move {
-                        sup.configure(spec).await;
-                        if let Err(e) = sup.ensure_ready().await {
+                        let state = handle.state::<AppState>();
+                        // Settings read under the lock: a switch that came first wins.
+                        let configured = {
+                            let _deploy = state.deploy.lock().await;
+                            state.sup.configure_with(|| state.spec_from_settings(&state.settings.get())).await
+                        };
+                        if configured && let Err(e) = state.sup.ensure_ready().await {
                             tracing::error!("preload failed: {e}");
                         }
                     });

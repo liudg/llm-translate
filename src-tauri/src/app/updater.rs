@@ -18,7 +18,7 @@ use crate::state::AppState;
 
 /// Minimum interval between automatic checks after a successful check.
 const CHECK_COOLDOWN: Duration = Duration::from_secs(30 * 60);
-/// Shorter cooldown after a failed automatic check (e.g. offline).
+/// Shorter cooldown after a failed check (e.g. offline).
 const FAIL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 /// Timeout for fetching `latest.json`.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
@@ -28,7 +28,7 @@ const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// Progress event throttle interval.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 
-pub const EVENT_NAME: &str = "update-state";
+const EVENT_NAME: &str = "update-state";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,9 +46,10 @@ pub struct DownloadProgress {
     pub total: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdatePhase {
+    #[default]
     Idle,
     Checking,
     UpToDate,
@@ -58,7 +59,7 @@ pub enum UpdatePhase {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSnapshot {
     pub phase: UpdatePhase,
@@ -69,43 +70,36 @@ pub struct UpdateSnapshot {
     pub error: Option<String>,
 }
 
-impl Default for UpdateSnapshot {
-    fn default() -> Self {
-        Self {
-            phase: UpdatePhase::Idle,
-            manual: false,
-            available: None,
-            progress: None,
-            error: None,
-        }
+impl UpdateSnapshot {
+    fn new(phase: UpdatePhase, manual: bool, available: Option<AvailableUpdate>) -> Self {
+        Self { phase, manual, available, progress: None, error: None }
+    }
+
+    fn failed(manual: bool, available: Option<AvailableUpdate>, error: String) -> Self {
+        Self { error: Some(error), ..Self::new(UpdatePhase::Error, manual, available) }
+    }
+
+    fn downloading(available: AvailableUpdate, progress: DownloadProgress) -> Self {
+        Self { progress: Some(progress), ..Self::new(UpdatePhase::Downloading, true, Some(available)) }
+    }
+
+    /// A check, download or install is running.
+    fn busy(&self) -> bool {
+        matches!(self.phase, UpdatePhase::Checking | UpdatePhase::Downloading | UpdatePhase::Installing)
     }
 }
 
+#[derive(Default)]
 struct Inner {
     snapshot: UpdateSnapshot,
     pending: Option<Update>,
-    last_checked: Option<Instant>,
-    last_failed: Option<Instant>,
-    busy: bool,
+    /// No automatic check before this.
+    next_auto_check: Option<Instant>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct UpdaterState {
     inner: Arc<Mutex<Inner>>,
-}
-
-impl Default for UpdaterState {
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(Inner {
-                snapshot: UpdateSnapshot::default(),
-                pending: None,
-                last_checked: None,
-                last_failed: None,
-                busy: false,
-            })),
-        }
-    }
 }
 
 impl UpdaterState {
@@ -113,7 +107,7 @@ impl UpdaterState {
         self.inner.lock().unwrap().snapshot.clone()
     }
 
-    fn publish(&self, app: &AppHandle, snapshot: UpdateSnapshot) {
+    fn set(&self, app: &AppHandle, snapshot: UpdateSnapshot) {
         self.inner.lock().unwrap().snapshot = snapshot.clone();
         let _ = app.emit(EVENT_NAME, snapshot);
     }
@@ -123,23 +117,8 @@ fn auto_check_enabled() -> bool {
     !cfg!(debug_assertions) || std::env::var_os("LLMT_AUTO_UPDATE").is_some()
 }
 
-fn should_auto_check(
-    busy: bool,
-    has_pending: bool,
-    last_checked: Option<Instant>,
-    last_failed: Option<Instant>,
-    now: Instant,
-) -> bool {
-    if busy || has_pending {
-        return false;
-    }
-    if last_checked.is_some_and(|t| now.saturating_duration_since(t) < CHECK_COOLDOWN) {
-        return false;
-    }
-    if last_failed.is_some_and(|t| now.saturating_duration_since(t) < FAIL_COOLDOWN) {
-        return false;
-    }
-    true
+fn should_auto_check(busy: bool, has_pending: bool, next: Option<Instant>, now: Instant) -> bool {
+    !busy && !has_pending && next.is_none_or(|t| now >= t)
 }
 
 fn format_pub_date(raw: Option<String>) -> Option<String> {
@@ -154,10 +133,7 @@ fn format_pub_date(raw: Option<String>) -> Option<String> {
 }
 
 fn clean_notes(notes: Option<String>) -> Option<String> {
-    notes.and_then(|s| {
-        let trimmed = s.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-    })
+    notes.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 fn to_available(u: &Update) -> AvailableUpdate {
@@ -199,10 +175,7 @@ fn build_updater(app: &AppHandle) -> Result<Updater, UpdaterError> {
     let builder = app
         .updater_builder()
         .timeout(CHECK_TIMEOUT)
-        .configure_client(|c| {
-            c.connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
-                .read_timeout(DOWNLOAD_READ_TIMEOUT)
-        });
+        .configure_client(|c| c.connect_timeout(DOWNLOAD_CONNECT_TIMEOUT).read_timeout(DOWNLOAD_READ_TIMEOUT));
 
     #[cfg(debug_assertions)]
     let builder = if let Ok(url) = std::env::var("LLMT_UPDATE_ENDPOINT") {
@@ -223,30 +196,14 @@ pub fn on_main_shown(app: &AppHandle) {
     let Some(state) = app.try_state::<UpdaterState>() else {
         return;
     };
-    let should_run = {
+    {
         let mut g = state.inner.lock().unwrap();
-        let now = Instant::now();
-        if !should_auto_check(g.busy, g.pending.is_some(), g.last_checked, g.last_failed, now) {
-            false
-        } else {
-            g.busy = true;
-            g.snapshot = UpdateSnapshot {
-                phase: UpdatePhase::Checking,
-                manual: false,
-                available: None,
-                progress: None,
-                error: None,
-            };
-            true
+        if !should_auto_check(g.snapshot.busy(), g.pending.is_some(), g.next_auto_check, Instant::now()) {
+            return;
         }
-    };
-    if !should_run {
-        return;
+        g.snapshot = UpdateSnapshot::new(UpdatePhase::Checking, false, None);
     }
-
-    let snap = state.snapshot();
-    let _ = app.emit(EVENT_NAME, snap);
-
+    let _ = app.emit(EVENT_NAME, state.snapshot());
     let app = app.clone();
     let state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
@@ -263,36 +220,19 @@ async fn run_check(app: AppHandle, state: UpdaterState, initial_manual: bool) ->
     let now = Instant::now();
     let snapshot = {
         let mut g = state.inner.lock().unwrap();
-        g.busy = false;
         // A manual check may have upgraded an in-flight automatic check.
         let manual = initial_manual || g.snapshot.manual;
-        match result {
-            Ok(Some(update)) => {
-                tracing::info!("update available: {} -> {}", update.current_version, update.version);
-                let avail = to_available(&update);
-                g.pending = Some(update);
-                g.last_checked = Some(now);
-                g.last_failed = None;
-                UpdateSnapshot {
-                    phase: UpdatePhase::Available,
-                    manual,
-                    available: Some(avail),
-                    progress: None,
-                    error: None,
+        let snapshot = match result {
+            Ok(update) => {
+                g.next_auto_check = Some(now + CHECK_COOLDOWN);
+                let available = update.as_ref().map(to_available);
+                match &update {
+                    Some(u) => tracing::info!("update available: {} -> {}", u.current_version, u.version),
+                    None => tracing::info!("application is up to date ({})", env!("CARGO_PKG_VERSION")),
                 }
-            }
-            Ok(None) => {
-                tracing::info!("application is up to date ({})", env!("CARGO_PKG_VERSION"));
-                g.pending = None;
-                g.last_checked = Some(now);
-                g.last_failed = None;
-                UpdateSnapshot {
-                    phase: UpdatePhase::UpToDate,
-                    manual,
-                    available: None,
-                    progress: None,
-                    error: None,
-                }
+                let phase = if update.is_some() { UpdatePhase::Available } else { UpdatePhase::UpToDate };
+                g.pending = update;
+                UpdateSnapshot::new(phase, manual, available)
             }
             Err(e) => {
                 if matches!(e, UpdaterError::ReleaseNotFound) {
@@ -300,24 +240,20 @@ async fn run_check(app: AppHandle, state: UpdaterState, initial_manual: bool) ->
                 } else {
                     tracing::warn!("update check failed: {e}");
                 }
-                g.last_failed = Some(now);
+                let retry = now + FAIL_COOLDOWN;
+                g.next_auto_check = Some(g.next_auto_check.map_or(retry, |t| t.max(retry)));
                 if manual {
                     g.pending = None;
-                    UpdateSnapshot {
-                        phase: UpdatePhase::Error,
-                        manual: true,
-                        available: None,
-                        progress: None,
-                        error: Some(friendly_error(&e)),
-                    }
+                    UpdateSnapshot::failed(true, None, friendly_error(&e))
                 } else {
                     UpdateSnapshot::default()
                 }
             }
-        }
+        };
+        g.snapshot = snapshot.clone();
+        snapshot
     };
-
-    state.publish(&app, snapshot.clone());
+    let _ = app.emit(EVENT_NAME, snapshot.clone());
     snapshot
 }
 
@@ -331,36 +267,23 @@ pub async fn update_check(app: AppHandle, state: State<'_, UpdaterState>) -> Res
     let start_new = {
         let mut g = state.inner.lock().unwrap();
         match g.snapshot.phase {
-            UpdatePhase::Downloading | UpdatePhase::Installing => {
-                return Ok(g.snapshot.clone());
-            }
-            UpdatePhase::Checking if g.busy => {
-                // Upgrade an in-flight automatic check to manual so its result is shown.
+            UpdatePhase::Downloading | UpdatePhase::Installing => return Ok(g.snapshot.clone()),
+            // Upgrade an in-flight automatic check to manual so its result is shown.
+            UpdatePhase::Checking => {
                 g.snapshot.manual = true;
                 false
             }
             _ => {
-                g.busy = true;
-                g.snapshot = UpdateSnapshot {
-                    phase: UpdatePhase::Checking,
-                    manual: true,
-                    available: None,
-                    progress: None,
-                    error: None,
-                };
+                g.snapshot = UpdateSnapshot::new(UpdatePhase::Checking, true, None);
                 true
             }
         }
     };
-
     let snap = state.snapshot();
     let _ = app.emit(EVENT_NAME, snap.clone());
-
     if !start_new {
-        // Wait briefly for the in-flight check to settle isn't needed; UI reacts to `update-state`.
-        return Ok(snap);
+        return Ok(snap); // the running check publishes its result
     }
-
     Ok(run_check(app, state.inner().clone(), true).await)
 }
 
@@ -372,86 +295,51 @@ pub async fn update_install(
 ) -> Result<(), String> {
     let (update, avail) = {
         let mut g = updater_state.inner.lock().unwrap();
-        if g.busy {
+        if g.snapshot.busy() {
             return Err("已有更新任务正在进行".into());
         }
         let Some(update) = g.pending.clone() else {
             return Err("当前没有可安装的更新".into());
         };
         let avail = to_available(&update);
-        g.busy = true;
-        g.snapshot = UpdateSnapshot {
-            phase: UpdatePhase::Downloading,
-            manual: true,
-            available: Some(avail.clone()),
-            progress: Some(DownloadProgress { downloaded: 0, total: None }),
-            error: None,
-        };
+        g.snapshot = UpdateSnapshot::downloading(avail.clone(), DownloadProgress { downloaded: 0, total: None });
         (update, avail)
     };
 
     let _ = app.emit(EVENT_NAME, updater_state.snapshot());
     tracing::info!("downloading update {} from {}", avail.version, update.download_url);
 
+    let state = updater_state.inner().clone();
+    let fail = |msg: String| {
+        state.set(&app, UpdateSnapshot::failed(true, Some(avail.clone()), msg.clone()));
+        Err(msg)
+    };
+
     let mut downloaded: u64 = 0;
     let mut last_emit = Instant::now() - PROGRESS_INTERVAL;
-    let progress_app = app.clone();
-    let progress_state = updater_state.inner().clone();
-    let progress_avail = avail.clone();
-
-    let finish_app = app.clone();
-    let finish_state = updater_state.inner().clone();
-    let finish_avail = avail.clone();
-
+    let (progress_app, progress_state, progress_avail) = (app.clone(), state.clone(), avail.clone());
+    let (finish_app, finish_state, finish_avail) = (app.clone(), state.clone(), avail.clone());
     let bytes = match update
         .download(
             move |chunk_len, total| {
                 downloaded += chunk_len as u64;
                 if last_emit.elapsed() >= PROGRESS_INTERVAL {
                     last_emit = Instant::now();
-                    progress_state.publish(
-                        &progress_app,
-                        UpdateSnapshot {
-                            phase: UpdatePhase::Downloading,
-                            manual: true,
-                            available: Some(progress_avail.clone()),
-                            progress: Some(DownloadProgress { downloaded, total }),
-                            error: None,
-                        },
-                    );
+                    let progress = DownloadProgress { downloaded, total };
+                    progress_state.set(&progress_app, UpdateSnapshot::downloading(progress_avail.clone(), progress));
                 }
             },
             move || {
-                finish_state.publish(
-                    &finish_app,
-                    UpdateSnapshot {
-                        phase: UpdatePhase::Installing,
-                        manual: true,
-                        available: Some(finish_avail),
-                        progress: None,
-                        error: None,
-                    },
-                );
+                finish_state
+                    .set(&finish_app, UpdateSnapshot::new(UpdatePhase::Installing, true, Some(finish_avail)));
             },
         )
         .await
     {
         Ok(b) => b,
         Err(e) => {
-            let msg = friendly_error(&e);
             tracing::error!("update download/verify failed: {e}");
-            updater_state.inner.lock().unwrap().busy = false;
-            updater_state.publish(
-                &app,
-                UpdateSnapshot {
-                    phase: UpdatePhase::Error,
-                    manual: true,
-                    available: Some(avail),
-                    progress: None,
-                    error: Some(msg.clone()),
-                },
-            );
-            return Err(msg);
+            return fail(friendly_error(&e));
         }
     };
 
@@ -468,33 +356,16 @@ pub async fn update_install(
         .await
         .map_err(|e| format!("启动安装程序失败：{e}"))
         .and_then(|r| r.map_err(|e| friendly_error(&e)));
-
     if let Err(msg) = install_res {
         tracing::error!("update install failed: {msg}");
-        updater_state.inner.lock().unwrap().busy = false;
-        updater_state.publish(
-            &app,
-            UpdateSnapshot {
-                phase: UpdatePhase::Error,
-                manual: true,
-                available: Some(avail),
-                progress: None,
-                error: Some(msg.clone()),
-            },
-        );
-        return Err(msg);
+        return fail(msg);
     }
-
     Ok(())
 }
 
 #[tauri::command]
 pub fn update_ignore(state: State<'_, AppState>, version: String) -> Result<(), String> {
-    state
-        .settings
-        .update(|s| s.ignored_update_version = Some(version))
-        .map(|_| ())
-        .map_err(|e| format!("保存设置失败：{e}"))
+    state.settings.save(|s| s.ignored_update_version = Some(version))
 }
 
 #[cfg(test)]
@@ -504,21 +375,16 @@ mod tests {
     #[test]
     fn cooldown_gates_repeated_auto_checks() {
         let now = Instant::now();
-        assert!(should_auto_check(false, false, None, None, now));
-        assert!(!should_auto_check(true, false, None, None, now));
-        assert!(!should_auto_check(false, true, None, None, now));
-        assert!(!should_auto_check(false, false, Some(now), None, now + Duration::from_secs(60)));
-        assert!(should_auto_check(false, false, Some(now), None, now + CHECK_COOLDOWN));
-        assert!(!should_auto_check(false, false, None, Some(now), now + Duration::from_secs(60)));
-        assert!(should_auto_check(false, false, None, Some(now), now + FAIL_COOLDOWN));
+        assert!(should_auto_check(false, false, None, now));
+        assert!(!should_auto_check(true, false, None, now));
+        assert!(!should_auto_check(false, true, None, now));
+        assert!(!should_auto_check(false, false, Some(now + CHECK_COOLDOWN), now + Duration::from_secs(60)));
+        assert!(should_auto_check(false, false, Some(now + CHECK_COOLDOWN), now + CHECK_COOLDOWN));
     }
 
     #[test]
     fn parses_pub_date_prefix() {
-        assert_eq!(
-            format_pub_date(Some("2026-11-22 13:20:00.0 +00:00:00".into())),
-            Some("2026-11-22".into())
-        );
+        assert_eq!(format_pub_date(Some("2026-11-22 13:20:00.0 +00:00:00".into())), Some("2026-11-22".into()));
         assert_eq!(format_pub_date(Some("bad".into())), None);
         assert_eq!(format_pub_date(None), None);
     }

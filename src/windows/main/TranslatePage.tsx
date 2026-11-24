@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useCopy } from "../../lib/useCopy";
 import { Check, Copy, PanelTop, RotateCw, ScanText, Square, X } from "lucide-react";
 import { api, type HotkeyInfo } from "../../lib/api";
-import { DIR_LABEL, DIR_SHORT, useTranslator, directionText, type DirChoice } from "../../lib/useTranslator";
-import { Button, IconButton, Segmented, Spinner } from "../../components/ui";
+import { DIR_LABEL, DIR_SHORT, footerText, useTranslator, type DirChoice } from "../../lib/useTranslator";
+import { Button, IconButton, Segmented } from "../../components/ui";
 import { StatusChip } from "../../components/status";
-import { useInference } from "../../stores/inference";
+import { TranslationBody } from "../../components/translation";
 
 const DEBOUNCE_MS = 500;
 const MAX_CHARS = 20000;
@@ -17,7 +17,6 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
   const [choice, setChoice] = useState<DirChoice>("auto");
   const { state, run, stop, clear } = useTranslator();
   const { copied, copy } = useCopy();
-  const status = useInference((s) => s.status);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const timer = useRef<number>(undefined);
   const [composing, setComposing] = useState(false);
@@ -53,9 +52,6 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
   const translateNow = () => runNow(choice);
 
   useEffect(() => inputRef.current?.focus(), []);
-
-  const waitingModel = state.busy && !state.result && status.state === "loading";
-  const dirText = directionText(state);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-5">
@@ -134,28 +130,10 @@ export default function TranslatePage({ hotkeys }: { hotkeys: HotkeyInfo[] }) {
         {/* Result */}
         <section className="flex min-h-0 flex-col rounded-lg border border-[var(--stroke)] bg-[var(--surface)] shadow-sm">
           <div className="selectable min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">
-            {state.result && <span className={state.busy ? "stream-caret" : ""}>{state.result}</span>}
-            {state.busy && !state.result && (
-              <span className="flex items-center gap-2 text-sm opacity-60">
-                <Spinner />
-                {waitingModel ? "正在加载模型…" : "翻译中…"}
-              </span>
-            )}
-            {!state.busy && !state.result && !state.error && !state.stopped && (
-              <span className="text-sm opacity-40">译文将显示在这里</span>
-            )}
-            {state.error && <div className="mt-1 text-sm text-red-600 dark:text-red-400">{state.error}</div>}
-            {state.stopped && (
-              <div className="mt-1 text-sm opacity-60">
-                {state.stopped === "user" ? "已停止" : "已被其他翻译请求中断"}
-              </div>
-            )}
+            <TranslationBody state={state} placeholder="译文将显示在这里" />
           </div>
           <div className="flex h-10 shrink-0 items-center gap-1 px-2 text-xs">
-            <span className="truncate px-2 opacity-60">
-              {dirText}
-              {state.elapsedMs !== null && state.elapsedMs > 0 && ` · ${(state.elapsedMs / 1000).toFixed(2)} 秒`}
-            </span>
+            <span className="truncate px-2 opacity-60">{footerText(state)}</span>
             <div className="ml-auto flex items-center gap-1">
               {state.busy ? (
                 <IconButton title="停止" onClick={stop}>

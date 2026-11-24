@@ -3,19 +3,11 @@
 // saved backend, previous model restored on failure) and delete.
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, Pause, Play, Trash2, X } from "lucide-react";
-import { api, errorText, events, type DownloadError, type LaunchOutcome, type ModelView } from "../../lib/api";
-import { backendName } from "../../lib/format";
+import { api, errorText, events, SELF_TEST_TEXT, type DownloadError, type LaunchOutcome, type ModelView } from "../../lib/api";
+import { backendName, gb, speed } from "../../lib/format";
 import { Badge, Button, Progress, Spinner } from "../../components/ui";
 import { StatusChip } from "../../components/status";
 import { useSettings } from "../../stores/settings";
-
-function gb(bytes: number) {
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-}
-
-function mbps(bps: number) {
-  return `${(bps / 1024 ** 2).toFixed(1)} MB/s`;
-}
 
 /** Live state of a download started on this page. */
 interface Transfer {
@@ -60,7 +52,7 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
         let next: Transfer = t;
         if (e.phase === "probe") next = { ...t, note: "正在测试下载源…" };
         if (e.phase === "download")
-          next = { ...t, done: e.done, total: e.total, verifying: false, note: `${mbps(e.speedBps)} · ${e.source}` };
+          next = { ...t, done: e.done, total: e.total, verifying: false, note: `${speed(e.speedBps)} · ${e.source}` };
         if (e.phase === "retry") next = { ...t, note: `${e.message}，${e.waitSecs} 秒后重试` };
         if (e.phase === "verify") next = { ...t, done: e.done, total: e.total, verifying: true, note: "正在校验文件…" };
         return { ...all, [e.modelId]: next };
@@ -104,14 +96,14 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
     try {
       const out: LaunchOutcome = await api.modelSwitch(m.id);
       setMessage(
-        out.fellBack
+        out.fallbackReason
           ? {
               tone: "warn",
               text: `已切换到 ${m.name}，但 GPU 启动失败，已改用 CPU（速度较慢）。原因：${out.fallbackReason}`,
             }
           : {
               tone: "good",
-              text: `已切换到 ${m.name} · ${backendName(out.backend)} · 加载 ${(out.loadMs / 1000).toFixed(1)} 秒；自检“${out.sampleSource}” → “${out.sample}”`,
+              text: `已切换到 ${m.name} · ${backendName(out.backend)} · 加载 ${(out.loadMs / 1000).toFixed(1)} 秒；自检“${SELF_TEST_TEXT}” → “${out.sample}”`,
             },
       );
     } catch (e) {

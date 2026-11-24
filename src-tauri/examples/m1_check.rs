@@ -134,6 +134,23 @@ async fn wait_status(sup: &Supervisor, f: impl Fn(&Status) -> bool, secs: u64) -
     }
 }
 
+/// Collect a whole translation (cancels any earlier request).
+async fn translate_text(tr: &Translator, text: &str) -> Result<String, String> {
+    let out = std::sync::Mutex::new(String::new());
+    let err = std::sync::Mutex::new(None);
+    tr.translate(TranslateRequest { text: text.into(), direction: None }, |ev| match ev {
+        TranslateEvent::Delta { text } => out.lock().unwrap().push_str(&text),
+        TranslateEvent::Error { message } => *err.lock().unwrap() = Some(message),
+        TranslateEvent::Cancelled => *err.lock().unwrap() = Some("已取消".into()),
+        _ => {}
+    })
+    .await;
+    match err.into_inner().unwrap() {
+        Some(e) => Err(e),
+        None => Ok(out.into_inner().unwrap()),
+    }
+}
+
 async fn infer(models_dir: &Path) {
     let m = Arc::new(manifest());
     let model = m.get("index-translate-2b-q4").unwrap().clone();
@@ -203,7 +220,7 @@ async fn infer(models_dir: &Path) {
         },
         async {
             tokio::time::sleep(Duration::from_millis(400)).await;
-            tr.translate_text("再见", None).await
+            translate_text(&tr, "再见").await
         }
     );
     println!("  first: {a:?}\n  second: {b:?}");
@@ -218,7 +235,7 @@ async fn infer(models_dir: &Path) {
     let s = wait_status(&sup, |s| matches!(s, Status::Ready { .. }), 60).await;
     println!("  recovered: {s:?} in {:.1}s", t0.elapsed().as_secs_f64());
     assert!(matches!(s, Status::Ready { backend: Backend::Vulkan, .. }));
-    let r = tr.translate_text("Thank you", None).await;
+    let r = translate_text(&tr, "Thank you").await;
     println!("  translate after restart: {r:?}");
     assert!(r.is_ok());
 
@@ -228,7 +245,7 @@ async fn infer(models_dir: &Path) {
     let s = wait_status(&sup, |s| matches!(s, Status::Idle), 120).await;
     println!("  {s:?} after {:.0}s", t0.elapsed().as_secs_f64());
     assert!(matches!(s, Status::Idle));
-    let r = tr.translate_text("Good night", None).await;
+    let r = translate_text(&tr, "Good night").await;
     println!("  reload + translate: {r:?} status {:?}", sup.status());
     assert!(r.is_ok());
     sup.stop().await;

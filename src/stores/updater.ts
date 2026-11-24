@@ -1,5 +1,7 @@
 import { create } from "zustand";
-import { api, errorText, events, type UpdateSnapshot } from "../lib/api";
+import { api, errorText, events, type UpdateProgress, type UpdateSnapshot } from "../lib/api";
+import { bytes } from "../lib/format";
+import { follow, once } from "../lib/sync";
 
 const INITIAL: UpdateSnapshot = {
   phase: "idle",
@@ -62,19 +64,18 @@ export const useUpdater = create<UpdaterStore>((set) => ({
   dismissBanner: (version: string) => set({ dismissedVersion: version }),
 }));
 
-let started = false;
-
 /** Subscribe once per window to backend updater events. */
-export function startUpdaterSync() {
-  if (started) return;
-  started = true;
-  // Subscribe first; the snapshot only applies if no newer event came in.
-  let gotEvent = false;
-  events.updateState((snapshot) => {
-    gotEvent = true;
-    useUpdater.setState({ snapshot });
-  });
-  api.updateStatus().then((snapshot) => {
-    if (!gotEvent) useUpdater.setState({ snapshot });
-  });
+export const startUpdaterSync = once(() =>
+  follow(events.updateState, api.updateStatus, (snapshot) => useUpdater.setState({ snapshot })),
+);
+
+/** Installer download: fraction done (0 when the size is unknown) and its text. */
+export function downloadProgress(prog: UpdateProgress | null): { ratio: number; text: string } {
+  if (!prog) return { ratio: 0, text: "" };
+  if (!prog.total) return { ratio: 0, text: bytes(prog.downloaded) };
+  const ratio = prog.downloaded / prog.total;
+  return {
+    ratio,
+    text: `${Math.min(100, Math.round(ratio * 100))}%（${bytes(prog.downloaded)} / ${bytes(prog.total)}）`,
+  };
 }

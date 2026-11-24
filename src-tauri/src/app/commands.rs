@@ -30,16 +30,12 @@ pub fn app_info(state: State<'_, AppInfo>) -> AppInfo {
 
 #[tauri::command]
 pub fn set_theme(state: State<'_, AppState>, theme: Theme) -> Result<(), String> {
-    state.settings.update(|s| s.theme = theme).map(|_| ()).map_err(|e| format!("保存设置失败：{e}"))
+    state.settings.save(|s| s.theme = theme)
 }
 
 #[tauri::command]
 pub fn set_idle_release(state: State<'_, AppState>, minutes: u32) -> Result<(), String> {
-    state
-        .settings
-        .update(|s| s.idle_release_minutes = minutes)
-        .map(|_| ())
-        .map_err(|e| format!("保存设置失败：{e}"))
+    state.settings.save(|s| s.idle_release_minutes = minutes)
 }
 
 /// Change backend/device/threads and restart the model with them. The restart
@@ -52,20 +48,19 @@ pub async fn set_inference(
     threads: u32,
 ) -> Result<(), String> {
     let device = if backend == Backend::Cpu { None } else { device };
-    let settings = state
-        .settings
-        .update(|s| {
-            s.backend = backend;
-            s.device = device.clone();
-            s.threads = threads.max(1);
-        })
-        .map_err(|e| format!("保存设置失败：{e}"))?;
-    let Some(spec) = state.spec_from_settings(&settings) else {
+    let deploy = state.deploy.lock().await;
+    state.settings.save(|s| {
+        s.backend = backend;
+        s.device = device.clone();
+        s.threads = threads.max(1);
+    })?;
+    let Some(spec) = state.spec_from_settings(&state.settings.get()) else {
         return Ok(()); // not deployed; used on the next deployment
     };
     tracing::info!("inference settings changed: {backend:?} {device:?} {threads} threads");
     let sup = state.sup.clone();
     sup.configure(spec).await;
+    drop(deploy);
     tauri::async_runtime::spawn(async move {
         if let Err(e) = sup.ensure_ready().await {
             tracing::error!("restart with new settings failed: {e}");
@@ -105,11 +100,7 @@ pub fn open_mini(app: AppHandle) {
 /// the settings forwarder.
 #[tauri::command]
 pub fn set_selection(state: State<'_, AppState>, selection: SelectionSettings) -> Result<(), String> {
-    state
-        .settings
-        .update(|s| s.selection = selection)
-        .map(|_| ())
-        .map_err(|e| format!("保存设置失败：{e}"))
+    state.settings.save(|s| s.selection = selection)
 }
 
 /// Start with Windows (HKCU Run, `--minimized`). Read from the registry each
@@ -121,10 +112,6 @@ pub fn autostart_enabled() -> bool {
 
 #[tauri::command]
 pub fn set_autostart(enabled: bool) -> Result<(), String> {
-    apply_autostart(enabled)
-}
-
-pub fn apply_autostart(enabled: bool) -> Result<(), String> {
     let r = super::autostart::set(enabled);
     tracing::info!("autostart {}: {r:?}", if enabled { "on" } else { "off" });
     r.map_err(|e| format!("设置开机自启失败：{e}"))

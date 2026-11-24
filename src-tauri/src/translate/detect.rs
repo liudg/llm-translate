@@ -52,8 +52,7 @@ fn counts(text: &str) -> (usize, usize) {
 
 /// Direction for a whole text (used for the overall label).
 pub fn detect(text: &str) -> Direction {
-    let (cjk, latin) = counts(text);
-    if cjk >= latin { Direction::Zh2En } else { Direction::En2Zh }
+    detect_paragraph(text).unwrap_or(Direction::Zh2En)
 }
 
 /// Direction for one paragraph; `None` when it has no letters at all

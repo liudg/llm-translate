@@ -2,14 +2,13 @@
 // and streams its translation. Hides on focus loss unless pinned; the backend
 // places it next to the selection and keeps it sized to this page.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, Languages, Pin, PinOff, RotateCcw, Square, X } from "lucide-react";
+import { ChevronDown, Languages, Pin, PinOff, RotateCcw, Square, X } from "lucide-react";
 import { api, events, type SelectionPayload } from "../../lib/api";
-import { DIR_SHORT, directionText, useTranslator, type DirChoice } from "../../lib/useTranslator";
-import { useCopy } from "../../lib/useCopy";
-import { IconButton, Spinner } from "../../components/ui";
-import { startInferenceSync, useInference } from "../../stores/inference";
-
-const NEXT: Record<DirChoice, DirChoice> = { auto: "zh2En", zh2En: "en2Zh", en2Zh: "auto" };
+import { NEXT_CHOICE, footerText, useTranslator, type DirChoice } from "../../lib/useTranslator";
+import { useAutoHeight } from "../../lib/useAutoHeight";
+import { IconButton } from "../../components/ui";
+import { CopyResultButton, DirCycleButton, TranslationBody } from "../../components/translation";
+import { startInferenceSync } from "../../stores/inference";
 
 export default function Popup() {
   const [payload, setPayload] = useState<SelectionPayload | null>(null);
@@ -17,8 +16,6 @@ export default function Popup() {
   const [pinned, setPinned] = useState(false);
   const [choice, setChoice] = useState<DirChoice>("auto");
   const { state, run, stop, clear } = useTranslator();
-  const { copied, copy } = useCopy();
-  const status = useInference((s) => s.status);
   const rootRef = useRef<HTMLDivElement>(null);
   const seen = useRef(0);
   const clearRef = useRef(clear);
@@ -58,20 +55,7 @@ export default function Popup() {
   }, [run]);
 
   // The window height follows the content.
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    let last = 0;
-    const ro = new ResizeObserver(() => {
-      const h = Math.ceil(el.getBoundingClientRect().height);
-      if (h !== last) {
-        last = h;
-        api.popupSetHeight(h);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  useAutoHeight(rootRef, (h) => api.popupSetHeight(h));
 
   const togglePin = () => {
     const p = !pinned;
@@ -80,13 +64,12 @@ export default function Popup() {
   };
 
   const cycleChoice = () => {
-    const c = NEXT[choice];
+    const c = NEXT_CHOICE[choice];
     setChoice(c);
     if (payload?.text) run(payload.text, c);
   };
 
   const source = payload?.text ?? "";
-  const dirText = directionText(state);
 
   return (
     <div ref={rootRef} className="flyout-frame flex flex-col text-sm">
@@ -106,15 +89,7 @@ export default function Popup() {
             划词翻译
           </span>
         )}
-        {source && (
-          <button
-            onClick={cycleChoice}
-            title="切换翻译方向"
-            className="h-7 shrink-0 rounded-md border border-[var(--stroke)] bg-[var(--surface)] px-2 text-xs whitespace-nowrap hover:bg-black/5 dark:hover:bg-white/10"
-          >
-            {DIR_SHORT[choice]}
-          </button>
-        )}
+        {source && <DirCycleButton choice={choice} onClick={cycleChoice} />}
         <IconButton title={pinned ? "取消钉住" : "钉住（失焦不关闭）"} onClick={togglePin} className="size-7">
           {pinned ? <PinOff className="size-3.5 text-[var(--accent-text)]" /> : <Pin className="size-3.5" />}
         </IconButton>
@@ -131,25 +106,12 @@ export default function Popup() {
 
       <div className="selectable max-h-[300px] min-h-10 overflow-y-auto border-t border-[var(--stroke)] px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">
         {payload?.error && <div className="text-sm opacity-75">{payload.error}</div>}
-        {state.result && <span className={state.busy ? "stream-caret" : ""}>{state.result}</span>}
-        {state.busy && !state.result && (
-          <span className="flex items-center gap-2 text-sm opacity-60">
-            <Spinner />
-            {status.state === "loading" ? "正在加载模型…" : "翻译中…"}
-          </span>
-        )}
-        {state.error && <div className="text-sm text-red-600 dark:text-red-400">{state.error}</div>}
-        {state.stopped && (
-          <div className="text-sm opacity-60">{state.stopped === "user" ? "已停止" : "已被其他翻译请求中断"}</div>
-        )}
+        <TranslationBody state={state} />
       </div>
 
       {source && (
         <div className="flex h-10 items-center gap-1 px-2 text-xs">
-          <span className="min-w-0 flex-1 truncate px-2 opacity-60">
-            {dirText}
-            {state.elapsedMs !== null && state.elapsedMs > 0 && ` · ${(state.elapsedMs / 1000).toFixed(2)} 秒`}
-          </span>
+          <span className="min-w-0 flex-1 truncate px-2 opacity-60">{footerText(state)}</span>
           {state.busy ? (
             <IconButton title="停止" onClick={stop} className="size-7">
               <Square className="size-3.5" />
@@ -159,14 +121,7 @@ export default function Popup() {
               <RotateCcw className="size-3.5" />
             </IconButton>
           )}
-          <button
-            disabled={!state.result}
-            onClick={() => copy(state.result)}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 dark:text-black"
-          >
-            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-            {copied ? "已复制" : "复制译文"}
-          </button>
+          <CopyResultButton text={state.result} />
         </div>
       )}
     </div>

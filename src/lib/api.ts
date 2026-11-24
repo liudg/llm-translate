@@ -94,7 +94,6 @@ export interface GpuDevice {
   name: string;
   totalMb: number;
   freeMb: number;
-  dedicatedMb: number | null;
   integrated: boolean;
 }
 
@@ -152,11 +151,13 @@ export interface LaunchEvent {
   message: string | null;
 }
 
+/** What the deployment self-test translates (`SELF_TEST` in deploy/wizard.rs). */
+export const SELF_TEST_TEXT = "你好，世界";
+
 export interface LaunchOutcome {
   backend: Backend;
-  fellBack: boolean;
+  /** Set when the GPU failed and the model runs on CPU instead. */
   fallbackReason: string | null;
-  sampleSource: string;
   sample: string;
   loadMs: number;
   translateMs: number;
@@ -194,7 +195,6 @@ export interface ShotPayload {
 export interface ShotParagraph {
   rect: [number, number, number, number];
   lineHeight: number;
-  linePitch: number;
   lines: number;
   text: string;
   translatable: boolean;

@@ -23,6 +23,7 @@ import {
   api,
   errorText,
   events,
+  SELF_TEST_TEXT,
   type Backend,
   type DetectResult,
   type DownloadError,
@@ -108,13 +109,12 @@ export default function Wizard() {
   useEffect(() => {
     // The wizard window is created on demand (first run or re-deploy), so
     // detect right away on mount and also handle `wizard-reset` if already open.
-    api.getSettings().then((s) => setWasDeployed(s.deployed));
-    runDetect();
+    reset();
     const un = listen("wizard-reset", reset);
     return () => {
       un.then((f) => f());
     };
-  }, [runDetect, reset]);
+  }, [reset]);
 
   // Refresh model list / free space when the target directory changes.
   useEffect(() => {
@@ -284,7 +284,7 @@ export default function Wizard() {
             detail={
               step === "launch"
                 ? `正在以 ${backendName(fallback ? "cpu" : (plan?.backend ?? "cpu"))} 加载模型，首次启动可能需要十几秒`
-                : "正在翻译「你好，世界」验证模型可用"
+                : `正在翻译「${SELF_TEST_TEXT}」验证模型可用`
             }
           >
             <Progress value={0} indeterminate />
@@ -634,11 +634,11 @@ function Done({
       </p>
       <Card className="w-full p-4 text-left text-sm">
         <div className="text-xs opacity-60">自检</div>
-        <div className="mt-1">{outcome.sampleSource}</div>
+        <div className="mt-1">{SELF_TEST_TEXT}</div>
         <div className="selectable mt-1 font-medium">{outcome.sample}</div>
         <div className="mt-1 text-xs opacity-60">耗时 {outcome.translateMs} ms</div>
       </Card>
-      {outcome.fellBack && (
+      {outcome.fallbackReason && (
         <p className="mt-3 flex items-start gap-2 rounded-md bg-amber-500/10 p-3 text-left text-xs text-amber-800 dark:text-amber-300">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>

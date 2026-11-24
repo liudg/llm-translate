@@ -1,7 +1,6 @@
 //! Child-process helpers: no console window, and a kill-on-close Job Object so
 //! llama-server never outlives the app (DESIGN 5.2).
 
-use std::os::windows::io::AsRawHandle;
 use std::sync::OnceLock;
 
 use windows::Win32::Foundation::HANDLE;
@@ -45,13 +44,5 @@ pub fn attach_to_job(child: &tokio::process::Child) {
         if let Err(e) = unsafe { AssignProcessToJobObject(job.0, HANDLE(raw)) } {
             tracing::warn!("AssignProcessToJobObject failed: {e}");
         }
-    }
-}
-
-/// Same, for a std child.
-#[allow(dead_code)]
-pub fn attach_std_to_job(child: &std::process::Child) {
-    if let Some(job) = job() {
-        let _ = unsafe { AssignProcessToJobObject(job.0, HANDLE(child.as_raw_handle())) };
     }
 }

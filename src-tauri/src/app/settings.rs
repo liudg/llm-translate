@@ -179,4 +179,9 @@ impl SettingsStore {
         saved?;
         Ok(snapshot)
     }
+
+    /// `update` for commands: the error as UI text.
+    pub fn save(&self, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
+        self.update(f).map(|_| ()).map_err(|e| format!("保存设置失败：{e}"))
+    }
 }

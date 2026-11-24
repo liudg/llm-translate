@@ -148,8 +148,9 @@ fn strip_label(s: &str) -> &str {
     PREFIXES.iter().find_map(|p| s.strip_prefix(p)).map_or(s, str::trim_start)
 }
 
-/// Convenience for whole strings (cache, tests).
-pub fn clean(source: &str, output: &str) -> String {
+/// Convenience for whole strings.
+#[cfg(test)]
+fn clean(source: &str, output: &str) -> String {
     let mut c = Cleaner::new(source);
     let mut s = c.push(output);
     s.push_str(&c.finish());

@@ -200,16 +200,13 @@ pub async fn probe_sources(
         }
         results.push((src, r));
     }
-    let late: Vec<String> = model
+    let late: Vec<Source> = model
         .sources
         .iter()
         .filter(|s| !results.iter().any(|(r, _): &(Source, _)| r.name == s.name))
-        .map(|s| s.name.clone())
+        .cloned()
         .collect();
-    for name in late {
-        let src = model.sources.iter().find(|s| s.name == name).unwrap().clone();
-        results.push((src, Err("响应过慢".to_string())));
-    }
+    results.extend(late.into_iter().map(|src| (src, Err("响应过慢".to_string()))));
     let mut ok = Vec::new();
     let mut errors = Vec::new();
     for (src, r) in results {

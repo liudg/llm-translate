@@ -17,7 +17,7 @@ use windows::core::w;
 
 use super::blacklist::{self, Blacklist};
 use super::icon::{Icon, scale_at};
-use super::{Job, ScreenRect};
+use super::ScreenRect;
 
 const MSG_DOWN: u32 = WM_APP + 1;
 const MSG_UP: u32 = WM_APP + 2;
@@ -161,12 +161,13 @@ struct Down {
 struct Tracker {
     icon: Icon,
     cfg: Arc<RwLock<Config>>,
-    jobs: Sender<Job>,
+    /// Anchors of icon clicks, for the capture thread.
+    jobs: Sender<ScreenRect>,
     mouse_hook: Option<HHOOK>,
     kb_hook: Option<HHOOK>,
     down: Option<Down>,
     last_up: Option<(POINT, u32)>,
-    pending: Option<Job>,
+    pending: Option<ScreenRect>,
 }
 
 thread_local! {
@@ -257,10 +258,10 @@ impl Tracker {
             right: pt.x.max(down.pt.x),
             bottom: pt.y.max(down.pt.y),
         };
-        self.show(Job { anchor, owner: self.icon.hwnd.0 as isize }, pt);
+        self.show(anchor, pt);
     }
 
-    fn show(&mut self, job: Job, pt: POINT) {
+    fn show(&mut self, anchor: ScreenRect, pt: POINT) {
         let r = self.icon.show_near(pt);
         for (a, v) in ICON_RECT.iter().zip([r.left, r.top, r.right, r.bottom]) {
             a.store(v, Relaxed);
@@ -274,7 +275,7 @@ impl Tracker {
         if self.kb_hook.is_none() {
             self.kb_hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0) }.ok();
         }
-        self.pending = Some(job);
+        self.pending = Some(anchor);
     }
 
     fn hide(&mut self) {
@@ -301,9 +302,9 @@ impl Tracker {
     }
 
     fn on_click(&mut self) {
-        if let Some(job) = self.pending.take() {
+        if let Some(anchor) = self.pending.take() {
             self.hide();
-            let _ = self.jobs.send(job);
+            let _ = self.jobs.send(anchor);
         }
     }
 }
@@ -337,7 +338,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 
 /// Start the hook thread; returns the icon window handle (also the clipboard
 /// owner for Ctrl+Insert, since this thread always pumps messages).
-pub fn spawn(cfg: Arc<RwLock<Config>>, jobs: Sender<Job>) -> anyhow::Result<isize> {
+pub fn spawn(cfg: Arc<RwLock<Config>>, jobs: Sender<ScreenRect>) -> anyhow::Result<isize> {
     let (tx, rx) = sync_channel(1);
     std::thread::Builder::new().name("selection-hook".into()).spawn(move || unsafe {
         let created = (|| -> windows::core::Result<HWND> {
