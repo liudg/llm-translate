@@ -194,12 +194,11 @@ pub async fn deploy_launch(
     // without saving it clears LAUNCHING, then checks again. Each side writes
     // before it reads, so at least one of them sees the other and reloads
     // (both reloading is harmless: it is the same spec).
-    // Every reload only replaces the spec it expects to find, so it never
-    // undoes a model switch started meanwhile.
+    // A reload never undoes another launch (see `reload_saved`).
     let launching = Launching::begin();
     if !window.is_visible().unwrap_or(false) {
         drop(launching);
-        reload_saved(&app, state.sup.spec());
+        reload_saved(&app);
         return Err("部署向导已关闭".into());
     }
     let mut candidate = None;
@@ -221,16 +220,25 @@ pub async fn deploy_launch(
             (_, None) => false,
         };
         if restored && !window.is_visible().unwrap_or(false) {
-            reload_saved(&app, state.sup.spec());
+            reload_saved(&app);
         }
     }
     result
 }
 
 /// Configure and start the model saved in settings (if any), in the
-/// background, provided the configured spec is still `expected`.
-fn reload_saved(app: &AppHandle, expected: Option<LaunchSpec>) {
+/// background, unless another launch (wizard / model switch) owns the model.
+///
+/// The configured spec is read first, then LAUNCHING; a launch raises
+/// LAUNCHING before it configures anything. So a launch that already
+/// configured its candidate is seen here and left alone, and one that starts
+/// later changes the spec, which makes `configure_if` refuse.
+fn reload_saved(app: &AppHandle) {
     let state = app.state::<AppState>();
+    let expected = state.sup.spec();
+    if LAUNCHING.load(Ordering::SeqCst) > 0 {
+        return; // that launch saves its model or restores the previous one
+    }
     let Some(spec) = state.spec_from_settings(&state.settings.get()) else { return };
     let sup = state.sup.clone();
     tauri::async_runtime::spawn(async move {
@@ -263,13 +271,10 @@ pub fn on_wizard_closed(app: &AppHandle) {
     }
     // The settings page refreshes when each paused download has wound down
     // (`download_model` emits `models-changed`).
-    // A launch still running reloads the saved model itself if it fails
-    // (see `deploy_launch`); reconfiguring under it would self-test the
-    // wrong model.
-    if LAUNCHING.load(Ordering::SeqCst) > 0 {
-        return;
-    }
-    reload_saved(app, state.sup.spec());
+    // A launch still running is left alone: a failed wizard launch reloads
+    // the saved model itself (see `deploy_launch`), a model switch restores
+    // its previous model.
+    reload_saved(app);
 }
 
 /// Start `model` and run the self-test, falling back from GPU to CPU. Settings
@@ -296,8 +301,17 @@ async fn launch_and_test(
     loop {
         let (b, d) = attempt.clone();
         let spec = state.spec_for(model, dir, b, d.clone(), threads);
+        // The CPU retry only replaces our own GPU candidate: if another
+        // launch took over meanwhile, this one is over.
+        match candidate.as_ref() {
+            None => state.sup.configure(spec.clone()).await,
+            Some(ours) => {
+                if !state.sup.configure_if(Some(ours), spec.clone(), false).await {
+                    return Err("模型已被其他操作切换，本次部署已中止".into());
+                }
+            }
+        }
         *candidate = Some(spec.clone());
-        state.sup.configure(spec.clone()).await;
         emit("starting", b, None);
         let t0 = Instant::now();
         let result = match state.sup.start().await {
