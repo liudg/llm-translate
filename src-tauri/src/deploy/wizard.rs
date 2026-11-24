@@ -116,13 +116,6 @@ pub async fn download_model(
     });
     tracing::info!("download {} -> {}", model.id, dir.display());
     let result = downloader::download(&state.http, &model, &dir, &ctl, progress).await;
-    state.downloads.lock().unwrap().remove(&model_id);
-    if from_wizard {
-        // Only now is the `.part` final and the model free to resume, so the
-        // settings page refreshes here (e.g. after the wizard closed and
-        // paused this download) rather than when the pause was requested.
-        let _ = app.emit_to("main", "models-changed", ());
-    }
     match &result {
         Ok(p) => tracing::info!("download ok: {}", p.display()),
         Err(DownloadError::Cancelled) => {
@@ -130,6 +123,13 @@ pub async fn download_model(
             tracing::info!("download cancelled: {}", model.id);
         }
         Err(e) => tracing::warn!("download {} stopped: {e:?}", model.id),
+    }
+    // Released only once the files are final (a cancelled `.part` is gone).
+    state.downloads.lock().unwrap().remove(&model_id);
+    if from_wizard {
+        // The settings page refreshes now (e.g. after the wizard closed and
+        // paused this download), not when the pause was requested.
+        let _ = app.emit_to("main", "models-changed", ());
     }
     result
 }
@@ -167,8 +167,10 @@ const SELF_TEST: &str = "你好，世界";
 /// Launch + SelfTest: start llama-server and translate a sample. A GPU failure
 /// retries on CPU and that choice is saved.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // command arguments come from the page
 pub async fn deploy_launch(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     model_id: String,
     dir: PathBuf,
@@ -178,6 +180,14 @@ pub async fn deploy_launch(
 ) -> Result<LaunchOutcome, String> {
     let model = state.manifest.get(&model_id).cloned().ok_or(format!("未知模型 {model_id}"))?;
     let _launching = Launching::begin();
+    // Closing the wizard hides it, then checks LAUNCHING (`show_main`); this
+    // sets LAUNCHING, then checks it is still shown. So either the close
+    // leaves the model to this launch, or this launch (from a wizard closed
+    // before its download finished) never starts and does not race the
+    // close's reload of the saved model.
+    if !window.is_visible().unwrap_or(false) {
+        return Err("部署向导已关闭".into());
+    }
     let result = launch_and_test(&app, &state, &model, &dir, backend, device, threads).await;
     if result.is_err() {
         state.sup.stop().await;

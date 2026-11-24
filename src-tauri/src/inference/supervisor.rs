@@ -484,10 +484,15 @@ mod tests {
         .await;
         let err = sup.start().await.unwrap_err();
         assert!(err.starts_with("推理程序启动"), "{err}");
+        let generation = sup.state.lock().await.generation;
         // The monitor's crash handler would restart after a 1 s backoff.
         tokio::time::sleep(Duration::from_millis(1800)).await;
+        let st = sup.state.lock().await;
+        // Any restart (even one failing the same way) bumps the generation.
+        assert_eq!(st.generation, generation, "the monitor restarted the server");
+        assert!(st.running.is_none());
+        drop(st);
         assert_eq!(sup.status(), Status::Failed { message: err });
-        assert!(sup.state.lock().await.running.is_none());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

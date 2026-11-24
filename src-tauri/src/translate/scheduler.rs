@@ -1,6 +1,7 @@
 //! Request scheduling (DESIGN 5.3): one queue; a new request cancels the one in
 //! progress; segments are translated in order and streamed out.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -69,10 +70,18 @@ pub struct Translator {
     current: Mutex<CancellationToken>,
     serial: tokio::sync::Mutex<()>,
     /// The model start in progress, shared by every request that needs it.
-    starting: Mutex<Option<StartFuture>>,
+    starting: Mutex<Option<Start>>,
 }
 
 type StartFuture = Shared<BoxFuture<'static, Result<u16, String>>>;
+
+struct Start {
+    fut: StartFuture,
+    /// Set by the start task itself: `Shared` only learns the result when
+    /// polled, and after a cancel nobody may poll it. A finished start's port
+    /// may be stale (idle release, model switch), so it is never reused.
+    done: Arc<AtomicBool>,
+}
 
 impl Translator {
     pub fn new(sup: Arc<Supervisor>, manifest: Arc<Manifest>) -> Self {
@@ -95,14 +104,20 @@ impl Translator {
     /// queueing a whole new round of retries behind it.
     fn start_model(&self) -> StartFuture {
         let mut slot = self.starting.lock().unwrap();
-        if let Some(f) = slot.as_ref().filter(|f| f.peek().is_none()) {
-            return f.clone();
+        if let Some(s) = slot.as_ref().filter(|s| !s.done.load(Ordering::SeqCst)) {
+            return s.fut.clone();
         }
         let sup = self.sup.clone();
-        let task = tauri::async_runtime::spawn(async move { sup.ensure_ready().await });
-        let f = async move { task.await.map_err(|e| format!("启动推理失败：{e}"))? }.boxed().shared();
-        *slot = Some(f.clone());
-        f
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let task = tauri::async_runtime::spawn(async move {
+            let r = sup.ensure_ready().await;
+            flag.store(true, Ordering::SeqCst);
+            r
+        });
+        let fut = async move { task.await.map_err(|e| format!("启动推理失败：{e}"))? }.boxed().shared();
+        *slot = Some(Start { fut: fut.clone(), done });
+        fut
     }
 
     /// Cancel whatever is running.

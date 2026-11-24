@@ -112,14 +112,17 @@ impl Cleaner {
     fn hold(&mut self, text: &str) -> String {
         let held = self.held.as_mut().unwrap();
         held.text.push_str(text);
-        match held.text.find(held.close) {
+        // Only a closing quote within the first MAX_HELD_CHARS counts, so the
+        // outcome depends on the text alone, not on how it was chunked.
+        let window = held.text.char_indices().nth(MAX_HELD_CHARS).map(|(i, _)| i);
+        match held.text[..window.unwrap_or(held.text.len())].find(held.close) {
             // Only whitespace after the first closing quote: may be the end.
             Some(i) if held.text[i + held.close.len_utf8()..].trim().is_empty() => return String::new(),
             Some(_) => {}
             // Still open: keep waiting, but not so long that a long answer
             // stops streaming. Past this the quote is kept as text (a stray
             // wrapper showing beats a whole paragraph appearing at once).
-            None if held.text.chars().count() <= MAX_HELD_CHARS => return String::new(),
+            None if window.is_none() => return String::new(),
             None => {}
         }
         // Text goes on after the closing quote (or it never closed in time):
@@ -217,5 +220,9 @@ mod tests {
         assert_eq!(out, format!("“{}", words.trim_end()));
         assert_eq!(c.push("end”"), " end”");
         assert_eq!(c.finish(), "");
+        // Same text, any chunking, same result (also for the cache).
+        let whole = format!("“{words}end”");
+        assert_eq!(clean("x", &whole), whole);
+        assert_eq!(streamed("x", &["“", &format!("{words}end”")]), whole);
     }
 }

@@ -21,8 +21,6 @@ export default function Popup() {
   const status = useInference((s) => s.status);
   const rootRef = useRef<HTMLDivElement>(null);
   const seen = useRef(0);
-  const busyRef = useRef(false);
-  busyRef.current = state.busy;
   const clearRef = useRef(clear);
   clearRef.current = clear;
 
@@ -41,8 +39,9 @@ export default function Popup() {
     const unSel = events.selection(accept);
     const unHide = events.popupHidden(() => {
       setPinned(false);
-      if (busyRef.current) stop();
       // Next capture opens clean instead of flashing this result first.
+      // `clear` also cancels a running request (once: a second cancel could
+      // hit a request another window started meanwhile).
       setPayload(null);
       setExpanded(false);
       clearRef.current();
@@ -56,7 +55,7 @@ export default function Popup() {
       unHide.then((f) => f());
       window.removeEventListener("keydown", onKey);
     };
-  }, [run, stop]);
+  }, [run]);
 
   // The window height follows the content.
   useEffect(() => {

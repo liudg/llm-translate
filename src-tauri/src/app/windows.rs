@@ -157,10 +157,13 @@ pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("wizard") {
         // Every way out of the wizard (close button, finish, tray menu) lands
         // here: pause its downloads and bring the saved model back.
-        if w.is_visible().unwrap_or(false) {
+        // Hidden first: `deploy_launch` checks visibility after flagging
+        // itself, which keeps a launch and this close from both proceeding.
+        let was_visible = w.is_visible().unwrap_or(false);
+        let _ = w.hide();
+        if was_visible {
             crate::deploy::wizard::on_wizard_closed(app);
         }
-        let _ = w.hide();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
