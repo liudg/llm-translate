@@ -216,6 +216,25 @@ impl Supervisor {
         self.status.send_replace(Status::Stopped);
     }
 
+    /// `configure`, but only if the configured spec is still `expected`:
+    /// nobody (a model switch, the wizard) took over meanwhile. `restart`
+    /// stops the process even when `spec` equals the current one (e.g. a
+    /// candidate that failed its self-test, so a retry starts it afresh).
+    pub async fn configure_if(&self, expected: Option<&LaunchSpec>, spec: LaunchSpec, restart: bool) -> bool {
+        let mut st = self.state.lock().await;
+        if st.spec.as_ref() != expected {
+            return false;
+        }
+        if restart || st.spec.as_ref() != Some(&spec) {
+            Self::stop_locked(&mut st).await;
+            *self.spec.lock().unwrap() = Some(spec.clone());
+            st.spec = Some(spec);
+            st.crashes = 0;
+            self.status.send_replace(Status::Stopped);
+        }
+        true
+    }
+
     pub async fn stop(&self) {
         let mut st = self.state.lock().await;
         Self::stop_locked(&mut st).await;
