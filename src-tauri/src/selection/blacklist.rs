@@ -43,6 +43,58 @@ pub fn process_name(pid: u32) -> Option<String> {
     }
 }
 
+/// Mandatory integrity level of a process (0x2000 medium, 0x3000 high).
+/// `Err(true)`: the process exists but its token is closed to us, which for a
+/// same-user process means it runs elevated. `Err(false)`: unknown.
+fn integrity_level(pid: u32) -> Result<u32, bool> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{
+        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+        TokenIntegrityLevel,
+    };
+    use windows::Win32::System::Threading::OpenProcessToken;
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).map_err(|_| false)?;
+        let mut token = HANDLE::default();
+        let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token);
+        let _ = CloseHandle(process);
+        opened.map_err(|_| true)?;
+        // TOKEN_MANDATORY_LABEL plus the SID it points to; 64 bytes is plenty.
+        let mut buf = [0u64; 8];
+        let mut len = 0u32;
+        let ok = GetTokenInformation(
+            token,
+            TokenIntegrityLevel,
+            Some(buf.as_mut_ptr().cast()),
+            std::mem::size_of_val(&buf) as u32,
+            &mut len,
+        );
+        let _ = CloseHandle(token);
+        ok.map_err(|_| false)?;
+        let sid = (*(buf.as_ptr() as *const TOKEN_MANDATORY_LABEL)).Label.Sid;
+        let count = *GetSidSubAuthorityCount(sid);
+        if count == 0 {
+            return Err(false);
+        }
+        Ok(*GetSidSubAuthority(sid, count as u32 - 1))
+    }
+}
+
+/// The process runs at a higher integrity level than this one (typically "Run
+/// as administrator"). UIPI then hides its mouse input from our low-level hook
+/// and blocks the simulated copy.
+pub fn runs_elevated_above_us(pid: u32) -> bool {
+    use std::sync::OnceLock;
+    static OWN: OnceLock<Option<u32>> = OnceLock::new();
+    let Some(own) = *OWN.get_or_init(|| integrity_level(std::process::id()).ok()) else {
+        return false;
+    };
+    match integrity_level(pid) {
+        Ok(level) => level > own,
+        Err(closed) => closed && own < 0x3000,
+    }
+}
+
 /// A D3D exclusive full-screen app or presentation mode is running.
 pub fn fullscreen_exclusive() -> bool {
     matches!(unsafe { SHQueryUserNotificationState() }, Ok(s) if s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)

@@ -3,11 +3,15 @@
 //! atomics and post messages to the icon window; gesture decisions run in the
 //! window procedure, so the callback never blocks (Windows silently removes
 //! hooks that time out). Text capture runs on the worker thread in `mod.rs`.
+//!
+//! A once-a-second watch timer on the same thread reinstalls the mouse hook
+//! when Windows has dropped it.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering::Relaxed};
 use std::sync::mpsc::{Sender, sync_channel};
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -27,6 +31,10 @@ const MSG_CONFIG: u32 = WM_APP + 5;
 
 const HIDE_TIMER: usize = 1;
 const HIDE_AFTER_MS: u32 = 3000;
+const WATCH_TIMER: usize = 2;
+const WATCH_EVERY_MS: u32 = 1000;
+/// At most one hook reinstall per this interval.
+const REINSTALL_GAP: Duration = Duration::from_secs(5);
 /// Minimum drag distance in DIPs.
 const DRAG_DIP: f32 = 8.0;
 /// Moving this far (DIPs) from the icon hides it.
@@ -48,6 +56,8 @@ static ICON_VISIBLE: AtomicBool = AtomicBool::new(false);
 static HOVER: AtomicBool = AtomicBool::new(false);
 static ICON_RECT: [AtomicI32; 4] = [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
 static FAR_PX: AtomicI32 = AtomicI32::new(120);
+/// Mouse hook invocations, for the watchdog.
+static MOUSE_CALLS: AtomicU32 = AtomicU32::new(0);
 /// Accept injected mouse input as gestures (automated tests only).
 pub static ACCEPT_INJECTED: AtomicBool = AtomicBool::new(false);
 
@@ -98,6 +108,7 @@ fn request_hide() {
 
 unsafe extern "system" fn mouse_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe {
+        MOUSE_CALLS.fetch_add(1, Relaxed);
         if code == HC_ACTION as i32 {
             let info = &*(lp.0 as *const MSLLHOOKSTRUCT);
             let injected = info.flags & LLMHF_INJECTED != 0;
@@ -162,6 +173,16 @@ struct Down {
     rect: RECT,
 }
 
+/// Watchdog state, sampled every `WATCH_EVERY_MS`.
+#[derive(Default)]
+struct Watch {
+    pos: POINT,
+    calls: u32,
+    input: u32,
+    last_reinstall: Option<Instant>,
+    reinstalls: u32,
+}
+
 struct Tracker {
     icon: Icon,
     cfg: Arc<RwLock<Config>>,
@@ -172,6 +193,7 @@ struct Tracker {
     down: Option<Down>,
     last_up: Option<(POINT, u32)>,
     pending: Option<ScreenRect>,
+    watch: Watch,
 }
 
 thread_local! {
@@ -194,18 +216,86 @@ impl Tracker {
                 Ok(h) => {
                     tracing::info!("selection hook installed");
                     self.mouse_hook = Some(h);
+                    self.sample_watch();
+                    unsafe {
+                        SetTimer(Some(self.icon.hwnd), WATCH_TIMER, WATCH_EVERY_MS, None);
+                    }
                 }
                 Err(e) => tracing::error!("installing the mouse hook failed: {e}"),
             },
             (false, Some(h)) => {
                 unsafe {
                     let _ = UnhookWindowsHookEx(h);
+                    let _ = KillTimer(Some(self.icon.hwnd), WATCH_TIMER);
                 }
                 self.mouse_hook = None;
                 self.hide();
                 tracing::info!("selection hook removed");
             }
             _ => {}
+        }
+    }
+
+    /// Record the watchdog baseline; returns the cursor position, or `None`
+    /// when it cannot be read (locked workstation, secure desktop).
+    fn sample_watch(&mut self) -> Option<POINT> {
+        let mut pos = POINT::default();
+        unsafe { GetCursorPos(&mut pos) }.ok()?;
+        self.watch.pos = pos;
+        self.watch.calls = MOUSE_CALLS.load(Relaxed);
+        self.watch.input = last_input_tick().unwrap_or(0);
+        Some(pos)
+    }
+
+    /// Watch timer: reinstall a hook Windows dropped.
+    fn on_watch(&mut self) {
+        // The timer only runs while selection is enabled: a hook that is
+        // missing here failed to reinstall last time, so try again.
+        if self.mouse_hook.is_none() {
+            self.reinstall_mouse_hook();
+            return;
+        }
+        let (prev_pos, prev_calls, prev_input) = (self.watch.pos, self.watch.calls, self.watch.input);
+        let Some(pos) = self.sample_watch() else { return };
+        let fg = unsafe { GetForegroundWindow() };
+        let fg_pid = if fg.is_invalid() { 0 } else { blacklist::window_pid(fg) };
+        let under = unsafe { GetAncestor(WindowFromPoint(pos), GA_ROOT) };
+        let under_pid = if under.is_invalid() { 0 } else { blacklist::window_pid(under) };
+        let elevated = |pid: u32| pid != 0 && blacklist::runs_elevated_above_us(pid);
+
+        // Windows removes a low-level hook without notice when a callback
+        // misses its deadline (sleep/resume, paging after a long idle,
+        // efficiency mode). The pointer moved and the system saw new input,
+        // yet the hook was not called once: it is gone. Input to elevated
+        // windows never reaches the hook, so it proves nothing.
+        let moved = pos != prev_pos;
+        let new_input = self.watch.input != prev_input;
+        if moved && new_input && self.watch.calls == prev_calls && !elevated(fg_pid) && !elevated(under_pid) {
+            self.reinstall_mouse_hook();
+        }
+    }
+
+    fn reinstall_mouse_hook(&mut self) {
+        if self.watch.last_reinstall.is_some_and(|t| t.elapsed() < REINSTALL_GAP) {
+            return;
+        }
+        self.watch.last_reinstall = Some(Instant::now());
+        self.watch.reinstalls += 1;
+        unsafe {
+            if let Some(h) = self.mouse_hook.take() {
+                let _ = UnhookWindowsHookEx(h); // fails harmlessly when already removed
+            }
+            match SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0) {
+                Ok(h) => self.mouse_hook = Some(h),
+                Err(e) => tracing::error!("reinstalling the mouse hook failed: {e}"),
+            }
+        }
+        // A press seen before the gap has lost its release.
+        self.down = None;
+        self.last_up = None;
+        let n = self.watch.reinstalls;
+        if n <= 20 || n % 100 == 0 {
+            tracing::warn!("the mouse hook was dropped by Windows; reinstalled (#{n})");
         }
     }
 
@@ -273,13 +363,16 @@ impl Tracker {
             return;
         }
         // Text selection starts or ends over text, under an I-beam (or an
-        // app's own cursor). Arrow / crosshair / hidden cursors at both ends
+        // app's own cursor). Crosshair / resize / hidden cursors at both ends
         // mean a game, a canvas or a screenshot overlay.
-        // Plain arrows are common over selectable text (terminals in mouse
-        // mode, `cursor: default` web text), so they only count together
+        // Arrows and hands are common over selectable text (terminals in
+        // mouse mode, `cursor: default` web text, clickable rows such as
+        // GitHub's log lines), and the system shows the app-starting arrow
+        // anywhere while some program launches, so these only count together
         // with a borderless full-screen window, the usual game setup.
+        let soft = |c: &str| matches!(c, "arrow" | "hand" | "app-starting");
         if let (Some(at_down), Some(at_up)) = (down.cursor, up_cursor)
-            && (at_down != "arrow" || at_up != "arrow" || borderless_fullscreen(down.root))
+            && (!soft(at_down) || !soft(at_up) || borderless_fullscreen(down.root))
         {
             let fg = unsafe { GetForegroundWindow() };
             let exe = blacklist::process_name(blacklist::window_pid(fg)).unwrap_or_default();
@@ -313,6 +406,7 @@ impl Tracker {
 
     fn show(&mut self, anchor: ScreenRect, pt: POINT) {
         let r = self.icon.show_near(pt);
+        tracing::debug!("selection icon shown at ({},{})", r.left, r.top);
         for (a, v) in ICON_RECT.iter().zip([r.left, r.top, r.right, r.bottom]) {
             a.store(v, Relaxed);
         }
@@ -377,6 +471,12 @@ fn borderless_fullscreen(h: HWND) -> bool {
     }
 }
 
+/// `GetTickCount` of the last input event the system received.
+fn last_input_tick() -> Option<u32> {
+    let mut lii = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    unsafe { GetLastInputInfo(&mut lii) }.as_bool().then_some(lii.dwTime)
+}
+
 fn is_topmost(h: HWND) -> bool {
     unsafe { GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0 }
 }
@@ -434,6 +534,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
         WM_LBUTTONUP => with_tracker(|t| t.on_click()),
         WM_TIMER if wp.0 == HIDE_TIMER => with_tracker(|t| t.on_timer()),
+        WM_TIMER if wp.0 == WATCH_TIMER => with_tracker(|t| t.on_watch()),
         MSG_DOWN => with_tracker(|t| t.on_down(unpack(lp))),
         MSG_UP => with_tracker(|t| t.on_up(unpack(lp), wp.0 as u32, (wp.0 >> 32) & 1 == 1)),
         MSG_HOVER => with_tracker(|t| t.icon.set_hover(wp.0 != 0)),
@@ -493,6 +594,7 @@ pub fn spawn(cfg: Arc<RwLock<Config>>, jobs: Sender<ScreenRect>) -> anyhow::Resu
                 down: None,
                 last_up: None,
                 pending: None,
+                watch: Watch::default(),
             };
             tracker.apply_config();
             *t.borrow_mut() = Some(tracker);
