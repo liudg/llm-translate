@@ -208,8 +208,9 @@ pub async fn deploy_launch(
         // only while we still own it.
         if let Some(ours) = candidate {
             match state.spec_from_settings(&state.settings.get()) {
-                Some(saved) => {
-                    state.sup.configure_if(ours, saved, true).await;
+                Some(_) => {
+                    let saved = || state.spec_from_settings(&state.settings.get());
+                    state.sup.configure_if_with(ours, true, saved).await;
                 }
                 None => state.sup.stop_if(ours).await,
             }
@@ -240,10 +241,16 @@ fn reload_saved(app: &AppHandle) {
     if LAUNCHING.load(Ordering::SeqCst) > 0 {
         return; // that launch saves its model or restores the previous one
     }
-    let Some(spec) = state.spec_from_settings(&state.settings.get()) else { return };
+    if state.spec_from_settings(&state.settings.get()).is_none() {
+        return;
+    }
     let sup = state.sup.clone();
+    let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        if sup.configure_if(owner, spec, false).await.is_none() {
+        // Settings read under the lock: a CPU fallback since then is kept.
+        let state = app.state::<AppState>();
+        let saved = || state.spec_from_settings(&state.settings.get());
+        if sup.configure_if_with(owner, false, saved).await.is_none() {
             return; // someone else configured a model meanwhile
         }
         if let Err(e) = sup.ensure_ready().await {
@@ -316,12 +323,16 @@ async fn launch_and_test(
         emit("starting", b, None);
         let t0 = Instant::now();
         // Started only while we own the spec: the process tested is ours.
+        // `tried` is the backend that actually failed, if this attempt fails.
+        let mut tried = b;
         let result = match state.sup.start_owned(owner).await {
-            Ok((port, running)) => {
+            Ok(started) => {
+                let running = started.spec;
+                tried = running.backend;
                 let load_ms = t0.elapsed().as_millis() as u64;
                 emit("selftest", running.backend, None);
                 let t1 = Instant::now();
-                match state.translator.self_test(SELF_TEST, model.clone(), port).await {
+                match state.translator.self_test(SELF_TEST, model.clone(), started.port, started.generation).await {
                     Ok(s) if !s.trim().is_empty() => Ok((s, load_ms, t1.elapsed().as_millis() as u64, running)),
                     Ok(_) => Err("自检失败：翻译结果为空".to_string()),
                     Err(e) => Err(format!("自检失败：{e}")),
@@ -336,6 +347,10 @@ async fn launch_and_test(
                 let (b, d) = (running.backend, running.device);
                 if b != attempt.0 && fallback_reason.is_none() {
                     fallback_reason = Some("GPU 推理程序运行失败，已自动改用 CPU".to_string());
+                }
+                // Never save a configuration someone replaced after the test.
+                if state.sup.owner() != owner {
+                    return Err("模型已被其他操作切换，本次部署已中止".into());
                 }
                 state
                     .settings
@@ -359,7 +374,9 @@ async fn launch_and_test(
                     translate_ms,
                 });
             }
-            Err(e) if b == Backend::Vulkan => {
+            // Only a failed GPU attempt retries on CPU (a CPU fallback may
+            // already have run this one on CPU).
+            Err(e) if tried == Backend::Vulkan => {
                 tracing::warn!("GPU launch failed, retrying on CPU: {e}");
                 emit("fallback", Backend::Cpu, Some(e.clone()));
                 fallback_reason = Some(e);

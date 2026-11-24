@@ -84,8 +84,8 @@ enum Target {
     /// asks the model).
     Configured { use_cache: bool },
     /// One given process (deployment self-test): never the cache, never
-    /// another process; if it dies, the request fails.
-    Process { model: ModelEntry, port: u16 },
+    /// another process; if it is gone or replaced, the request fails.
+    Process { model: ModelEntry, port: u16, generation: u64 },
 }
 
 /// Port and generation of the started process (`Supervisor::is_live`).
@@ -186,8 +186,8 @@ impl Translator {
     /// Deployment self-test: translate with the process the deployment just
     /// started on `port`, running `model`. Restarts and the CPU fallback are
     /// the deployment's business: if that process is gone, this fails.
-    pub async fn self_test(&self, text: &str, model: ModelEntry, port: u16) -> Result<String, String> {
-        self.collect(text, None, Target::Process { model, port }).await
+    pub async fn self_test(&self, text: &str, model: ModelEntry, port: u16, generation: u64) -> Result<String, String> {
+        self.collect(text, None, Target::Process { model, port, generation }).await
     }
 
     async fn collect(&self, text: &str, direction: Option<Direction>, target: Target) -> Result<String, String> {
@@ -251,7 +251,18 @@ impl Translator {
 
         let (mut model, mut run) = match target {
             Target::Configured { use_cache } => (self.model()?, RunState { port: None, use_cache }),
-            Target::Process { model, port } => (model, RunState { port: Some(port), use_cache: false }),
+            Target::Process { model, port, generation } => {
+                // Queued behind other requests: the process may have been
+                // replaced meanwhile, possibly by one on the same port.
+                let live = tokio::select! {
+                    l = self.sup.is_live(generation) => l,
+                    _ = token.cancelled() => return Err(ChatError::Cancelled),
+                };
+                if !live {
+                    return Err(ChatError::Failed("推理程序已被替换".into()));
+                }
+                (model, RunState { port: Some(port), use_cache: false })
+            }
         };
         self.stream_pieces(&mut model, &mut run, token, pieces, para_dir, &|text| sink(TranslateEvent::Delta { text }))
             .await?;

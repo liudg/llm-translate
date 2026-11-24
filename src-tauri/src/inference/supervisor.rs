@@ -107,6 +107,15 @@ struct State {
     owner: u64,
 }
 
+/// A process `start_owned` handed out.
+pub struct Started {
+    pub port: u16,
+    /// For `is_live`: the port means nothing once this process is replaced.
+    pub generation: u64,
+    /// What it actually runs (a CPU fallback may differ from the request).
+    pub spec: LaunchSpec,
+}
+
 pub struct Supervisor {
     state: tokio::sync::Mutex<State>,
     /// Copy of `State::spec` readable without waiting for a model load that
@@ -228,10 +237,23 @@ impl Supervisor {
     /// the process even when `spec` equals the current one (e.g. a candidate
     /// that failed its self-test, so a retry starts it afresh).
     pub async fn configure_if(&self, owner: u64, spec: LaunchSpec, restart: bool) -> Option<u64> {
+        self.configure_if_with(owner, restart, || Some(spec)).await
+    }
+
+    /// `configure_if` with the spec made under the lock, e.g. from settings:
+    /// the CPU fallback saves its settings while holding the lock, so a spec
+    /// read here can never undo a fallback that just happened.
+    pub async fn configure_if_with(
+        &self,
+        owner: u64,
+        restart: bool,
+        spec: impl FnOnce() -> Option<LaunchSpec>,
+    ) -> Option<u64> {
         let mut st = self.state.lock().await;
         if st.owner != owner {
             return None;
         }
+        let spec = spec()?;
         Some(self.set_spec_locked(&mut st, spec, restart).await)
     }
 
@@ -290,7 +312,7 @@ impl Supervisor {
     /// lock, so the process cannot be someone else's). Returns the port and
     /// the spec actually running, which a concurrent request's CPU fallback
     /// may have changed from the configured one.
-    pub async fn start_owned(self: &Arc<Self>, owner: u64) -> Result<(u16, LaunchSpec), String> {
+    pub async fn start_owned(self: &Arc<Self>, owner: u64) -> Result<Started, String> {
         let mut st = self.state.lock().await;
         if st.owner != owner {
             return Err("模型已被其他操作切换，本次启动已中止".into());
@@ -300,7 +322,7 @@ impl Supervisor {
             _ => self.start_locked(&mut st).await?,
         };
         let spec = st.spec.clone().ok_or("尚未部署模型")?;
-        Ok((port, spec))
+        Ok(Started { port, generation: st.generation, spec })
     }
 
     async fn start_locked(self: &Arc<Self>, st: &mut State) -> Result<u16, String> {
