@@ -13,7 +13,6 @@ use super::downloader::{self, Control, DownloadError, Progress, StopReason};
 use super::hardware::{self, HardwareInfo, Recommendation};
 use super::manifest::ModelEntry;
 use crate::app::settings::Backend;
-use crate::inference::supervisor::LaunchSpec;
 use crate::state::{ActiveDownload, AppState};
 
 /// Launches + self-tests running (wizard and / or model switch). A count,
@@ -206,20 +205,20 @@ pub async fn deploy_launch(
     if result.is_err() {
         drop(launching);
         // Back to the saved model, not left on the failed candidate (stopped
-        // even if it has the saved spec, so a retry starts it afresh);
-        // started now if the wizard is gone, else on first use.
-        let saved = state.spec_from_settings(&state.settings.get());
-        let restored = match (saved, &candidate) {
-            (Some(saved), Some(c)) => state.sup.configure_if(Some(c), saved, true).await,
-            (None, Some(c)) => {
-                if state.sup.spec().as_ref() == Some(c) {
-                    state.sup.stop().await;
+        // even if it has the saved spec, so a retry starts it afresh), but
+        // only while we still own it.
+        if let Some(ours) = candidate {
+            match state.spec_from_settings(&state.settings.get()) {
+                Some(saved) => {
+                    state.sup.configure_if(ours, saved, true).await;
                 }
-                false
+                None => state.sup.stop_if(ours).await,
             }
-            (_, None) => false,
-        };
-        if restored && !window.is_visible().unwrap_or(false) {
+        }
+        // Wizard gone: start the saved model now, including when this launch
+        // failed before configuring anything (the close skipped its reload
+        // because we were running). Else it starts on first use.
+        if !window.is_visible().unwrap_or(false) {
             reload_saved(&app);
         }
     }
@@ -229,20 +228,20 @@ pub async fn deploy_launch(
 /// Configure and start the model saved in settings (if any), in the
 /// background, unless another launch (wizard / model switch) owns the model.
 ///
-/// The configured spec is read first, then LAUNCHING; a launch raises
+/// The spec's owner is read first, then LAUNCHING; a launch raises
 /// LAUNCHING before it configures anything. So a launch that already
 /// configured its candidate is seen here and left alone, and one that starts
-/// later changes the spec, which makes `configure_if` refuse.
+/// later takes ownership, which makes `configure_if` refuse.
 fn reload_saved(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let expected = state.sup.spec();
+    let owner = state.sup.owner();
     if LAUNCHING.load(Ordering::SeqCst) > 0 {
         return; // that launch saves its model or restores the previous one
     }
     let Some(spec) = state.spec_from_settings(&state.settings.get()) else { return };
     let sup = state.sup.clone();
     tauri::async_runtime::spawn(async move {
-        if !sup.configure_if(expected.as_ref(), spec, false).await {
+        if sup.configure_if(owner, spec, false).await.is_none() {
             return; // someone else configured a model meanwhile
         }
         if let Err(e) = sup.ensure_ready().await {
@@ -286,7 +285,7 @@ async fn launch_and_test(
     backend: Backend,
     device: Option<String>,
     threads: u32,
-    candidate: &mut Option<LaunchSpec>,
+    candidate: &mut Option<u64>,
 ) -> Result<LaunchOutcome, String> {
     if !model.is_installed(dir) {
         return Err("模型文件不存在或不完整，请重新下载".into());
@@ -301,25 +300,25 @@ async fn launch_and_test(
     loop {
         let (b, d) = attempt.clone();
         let spec = state.spec_for(model, dir, b, d.clone(), threads);
-        // The CPU retry only replaces our own GPU candidate: if another
-        // launch took over meanwhile, this one is over.
-        match candidate.as_ref() {
-            None => state.sup.configure(spec.clone()).await,
-            Some(ours) => {
-                if !state.sup.configure_if(Some(ours), spec.clone(), false).await {
-                    return Err("模型已被其他操作切换，本次部署已中止".into());
-                }
-            }
-        }
-        *candidate = Some(spec.clone());
+        // The CPU retry only replaces our own GPU candidate (the automatic
+        // CPU fallback keeps us the owner): if another launch took over
+        // meanwhile, this one is over.
+        let owner = match *candidate {
+            None => state.sup.configure(spec).await,
+            Some(ours) => match state.sup.configure_if(ours, spec, false).await {
+                Some(owner) => owner,
+                None => return Err("模型已被其他操作切换，本次部署已中止".into()),
+            },
+        };
+        *candidate = Some(owner);
         emit("starting", b, None);
         let t0 = Instant::now();
         let result = match state.sup.start().await {
-            Ok(_) => {
+            Ok(port) => {
                 let load_ms = t0.elapsed().as_millis() as u64;
                 emit("selftest", b, None);
                 let t1 = Instant::now();
-                match state.translator.self_test(SELF_TEST, None, spec).await {
+                match state.translator.self_test(SELF_TEST, model.clone(), port).await {
                     Ok(s) if !s.trim().is_empty() => Ok((s, load_ms, t1.elapsed().as_millis() as u64)),
                     Ok(_) => Err("自检失败：翻译结果为空".to_string()),
                     Err(e) => Err(format!("自检失败：{e}")),
@@ -376,7 +375,7 @@ pub async fn model_switch(app: AppHandle, state: State<'_, AppState>, model_id: 
     let s = state.settings.get();
     let previous = state.spec_from_settings(&s);
     tracing::info!("switching model {:?} -> {}", s.model_id, model.id);
-    let _launching = Launching::begin();
+    let launching = Launching::begin();
     let mut candidate = None;
     let result =
         launch_and_test(&app, &model, &s.models_dir, s.backend, s.device.clone(), s.threads, &mut candidate)
@@ -384,12 +383,23 @@ pub async fn model_switch(app: AppHandle, state: State<'_, AppState>, model_id: 
     let Err(e) = result else { return result };
     tracing::warn!("switching to {} failed: {e}", model.id);
     let Some(prev) = previous else {
-        state.sup.stop().await;
+        if let Some(ours) = candidate {
+            state.sup.stop_if(ours).await;
+        }
         return Err(e);
     };
     // Only over our own failed candidate: a wizard launch may have taken over.
     let sup = state.sup.clone();
-    if !sup.configure_if(candidate.as_ref(), prev, true).await {
+    let restored = match candidate {
+        Some(ours) => sup.configure_if(ours, prev, true).await.is_some(),
+        None => false,
+    };
+    if !restored {
+        // Nothing of ours to roll back (failed before configuring, or taken
+        // over). A wizard closed meanwhile skipped its reload because we were
+        // running, so do it now; it leaves any other running launch alone.
+        drop(launching);
+        reload_saved(&app);
         return Err(e);
     }
     tauri::async_runtime::spawn(async move {

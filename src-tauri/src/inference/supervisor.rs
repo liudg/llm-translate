@@ -6,7 +6,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -100,6 +100,11 @@ struct State {
     /// Bumped on every intentional stop/start so stale monitors can tell.
     generation: u64,
     crashes: u32,
+    /// Who configured `spec`: a new number on every `configure` /
+    /// `configure_if`, kept by crash restarts and the CPU fallback. A launch
+    /// rolls back only what it still owns, even if a newer launch happened
+    /// to configure an identical spec.
+    owner: u64,
 }
 
 pub struct Supervisor {
@@ -107,6 +112,8 @@ pub struct Supervisor {
     /// Copy of `State::spec` readable without waiting for a model load that
     /// holds `state` (translation requests must stay cancellable meanwhile).
     spec: Mutex<Option<LaunchSpec>>,
+    /// Copy of `State::owner`, readable without the lock.
+    owner: AtomicU64,
     status: watch::Sender<Status>,
     last_used: Mutex<Instant>,
     idle_minutes: AtomicU32,
@@ -159,8 +166,9 @@ fn log_tail(path: &PathBuf) -> String {
 impl Supervisor {
     pub fn new(on_notice: NoticeFn) -> Arc<Self> {
         let sup = Arc::new(Self {
-            state: tokio::sync::Mutex::new(State { spec: None, running: None, generation: 0, crashes: 0 }),
+            state: tokio::sync::Mutex::new(State { spec: None, running: None, generation: 0, crashes: 0, owner: 0 }),
             spec: Mutex::new(None),
+            owner: AtomicU64::new(0),
             status: watch::channel(Status::Unconfigured).0,
             last_used: Mutex::new(Instant::now()),
             idle_minutes: AtomicU32::new(0),
@@ -203,41 +211,58 @@ impl Supervisor {
         msg
     }
 
-    /// Set what to run. Stops a running server whose spec differs.
-    pub async fn configure(&self, spec: LaunchSpec) {
-        let mut st = self.state.lock().await;
-        if st.spec.as_ref() == Some(&spec) {
-            return;
-        }
-        Self::stop_locked(&mut st).await;
-        *self.spec.lock().unwrap() = Some(spec.clone());
-        st.spec = Some(spec);
-        st.crashes = 0;
-        self.status.send_replace(Status::Stopped);
+    /// Who configured the current spec (see `State::owner`).
+    pub fn owner(&self) -> u64 {
+        self.owner.load(Ordering::SeqCst)
     }
 
-    /// `configure`, but only if the configured spec is still `expected`:
-    /// nobody (a model switch, the wizard) took over meanwhile. `restart`
-    /// stops the process even when `spec` equals the current one (e.g. a
-    /// candidate that failed its self-test, so a retry starts it afresh).
-    pub async fn configure_if(&self, expected: Option<&LaunchSpec>, spec: LaunchSpec, restart: bool) -> bool {
+    /// Set what to run and take ownership of it; returns the new owner.
+    /// Stops a running server whose spec differs.
+    pub async fn configure(&self, spec: LaunchSpec) -> u64 {
         let mut st = self.state.lock().await;
-        if st.spec.as_ref() != expected {
-            return false;
+        self.set_spec_locked(&mut st, spec, false).await
+    }
+
+    /// `configure`, but only if `owner` still owns the spec: nobody (a model
+    /// switch, the wizard, new settings) took over meanwhile. `restart` stops
+    /// the process even when `spec` equals the current one (e.g. a candidate
+    /// that failed its self-test, so a retry starts it afresh).
+    pub async fn configure_if(&self, owner: u64, spec: LaunchSpec, restart: bool) -> Option<u64> {
+        let mut st = self.state.lock().await;
+        if st.owner != owner {
+            return None;
         }
+        Some(self.set_spec_locked(&mut st, spec, restart).await)
+    }
+
+    async fn set_spec_locked(&self, st: &mut State, spec: LaunchSpec, restart: bool) -> u64 {
         if restart || st.spec.as_ref() != Some(&spec) {
-            Self::stop_locked(&mut st).await;
+            Self::stop_locked(st).await;
             *self.spec.lock().unwrap() = Some(spec.clone());
             st.spec = Some(spec);
             st.crashes = 0;
             self.status.send_replace(Status::Stopped);
         }
-        true
+        st.owner += 1;
+        self.owner.store(st.owner, Ordering::SeqCst);
+        st.owner
     }
 
     pub async fn stop(&self) {
         let mut st = self.state.lock().await;
-        Self::stop_locked(&mut st).await;
+        self.stop_reporting(&mut st).await;
+    }
+
+    /// `stop`, but only if `owner` still owns the spec.
+    pub async fn stop_if(&self, owner: u64) {
+        let mut st = self.state.lock().await;
+        if st.owner == owner {
+            self.stop_reporting(&mut st).await;
+        }
+    }
+
+    async fn stop_reporting(&self, st: &mut State) {
+        Self::stop_locked(st).await;
         if st.spec.is_some() {
             self.status.send_replace(Status::Stopped);
         }
@@ -527,6 +552,32 @@ mod tests {
         drop(st);
         assert_eq!(sup.status(), Status::Failed { message: err });
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A launch rolls back only what it still owns, even when a newer launch
+    /// configured an identical spec.
+    #[tokio::test]
+    async fn rollback_needs_ownership_not_an_equal_spec() {
+        let spec = |id: &str| LaunchSpec {
+            exe: PathBuf::from("llama-server.exe"),
+            model_path: PathBuf::from("model.gguf"),
+            model_id: id.into(),
+            backend: Backend::Cpu,
+            device: None,
+            threads: 1,
+            ctx: 512,
+            log_path: PathBuf::from("server.log"),
+        };
+        let sup = Supervisor::new(Arc::new(|_| {}));
+        let old = sup.configure(spec("cand")).await;
+        let newer = sup.configure(spec("cand")).await; // same spec, new launch
+        assert_ne!(old, newer);
+        assert_eq!(sup.configure_if(old, spec("saved"), true).await, None);
+        assert_eq!(sup.spec().unwrap().model_id, "cand");
+        sup.stop_if(old).await; // no-op for a stale owner
+        let restored = sup.configure_if(newer, spec("saved"), true).await;
+        assert!(restored.is_some_and(|o| o == sup.owner()));
+        assert_eq!(sup.spec().unwrap().model_id, "saved");
     }
 
     #[test]
