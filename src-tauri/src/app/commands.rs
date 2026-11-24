@@ -91,8 +91,9 @@ pub fn open_models_dir(state: State<'_, AppState>) {
     open_in_explorer(state.settings.get().models_dir);
 }
 
+/// Async: it may create the mini window (see `windows::off_main_thread`).
 #[tauri::command]
-pub fn open_mini(app: AppHandle) {
+pub async fn open_mini(app: AppHandle) {
     super::windows::show_mini(&app);
 }
 

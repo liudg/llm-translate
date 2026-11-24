@@ -282,7 +282,7 @@ pub fn run() {
                     // Re-deploy opened from the main window: close wizard to free its WebView and return to main.
                     "wizard" if app.state::<AppState>().settings.get().deployed => {
                         api.prevent_close();
-                        show_main(app);
+                        windows::off_main_thread(app, show_main);
                     }
                     // Closing the wizard before the first deployment quits.
                     _ => app.exit(0),

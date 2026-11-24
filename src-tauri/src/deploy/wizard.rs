@@ -365,17 +365,19 @@ pub fn model_delete(state: State<'_, AppState>, model_id: String) -> Result<(), 
 }
 
 /// Leave the wizard: apply the "start with Windows" choice and show the main
-/// window.
+/// window. Async so it runs off the main thread: creating the main window from
+/// a synchronous command deadlocks on Windows (see `off_main_thread`).
 #[tauri::command]
-pub fn deploy_finish(app: AppHandle, autostart: Option<bool>) {
+pub async fn deploy_finish(app: AppHandle, autostart: Option<bool>) {
     if let Some(on) = autostart {
         let _ = crate::app::commands::set_autostart(on);
     }
     crate::show_main(&app);
 }
 
+/// Async for the same reason as `deploy_finish`: it may create the wizard.
 #[tauri::command]
-pub fn open_wizard(app: AppHandle) {
+pub async fn open_wizard(app: AppHandle) {
     let existed = app.get_webview_window("wizard").is_some();
     if let Ok(w) = crate::app::windows::ensure_window(&app, "wizard") {
         if existed {

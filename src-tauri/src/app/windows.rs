@@ -59,8 +59,20 @@ fn tauri_theme(theme: Theme) -> Option<tauri::Theme> {
     }
 }
 
+/// Run `f` on a worker thread. Building a WebView2 window on the main thread
+/// from a synchronous command or an event handler (tray menu, window event,
+/// global shortcut, second instance) deadlocks on Windows, see
+/// `WebviewWindowBuilder::new`. From a worker thread the build is handed to
+/// the event loop and waited on instead. Anything that may create a window
+/// (`ensure_window`, `show_main`, `show_mini`) from such a context goes here.
+pub fn off_main_thread(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || f(&app));
+}
+
 /// Return an existing window or create it from `tauri.conf.json` with the
-/// backdrop and theme for this OS build.
+/// backdrop and theme for this OS build. Never call it on the main thread
+/// outside `setup` while the window may not exist yet: see `off_main_thread`.
 pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
     if let Some(win) = app.get_webview_window(label) {
         return Ok(win);

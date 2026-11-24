@@ -74,7 +74,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "mini" => {
                 if deployed(app) {
-                    windows::show_mini(app);
+                    windows::off_main_thread(app, windows::show_mini);
                 } else {
                     open_primary(app);
                 }
@@ -89,8 +89,10 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             "selection" => hotkey::toggle_selection(app),
             "settings" => {
                 if deployed(app) {
-                    windows::show_main(app);
-                    let _ = app.emit_to("main", "navigate", "settings");
+                    windows::off_main_thread(app, |app| {
+                        windows::show_main(app);
+                        let _ = app.emit_to("main", "navigate", "settings");
+                    });
                 } else {
                     open_primary(app);
                 }
@@ -117,8 +119,13 @@ pub fn deployed(app: &AppHandle) -> bool {
     app.state::<AppState>().settings.get().deployed
 }
 
-/// Main window when deployed, otherwise the deployment wizard.
+/// Main window when deployed, otherwise the deployment wizard. Safe to call
+/// from event handlers: the work runs off the main thread.
 pub fn open_primary(app: &AppHandle) {
+    windows::off_main_thread(app, open_primary_now);
+}
+
+fn open_primary_now(app: &AppHandle) {
     let busy_wizard = app
         .get_webview_window("wizard")
         .filter(|w| w.is_visible().unwrap_or(false) && crate::deploy::wizard::wizard_busy(app));

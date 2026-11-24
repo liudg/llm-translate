@@ -129,7 +129,7 @@ pub fn plugin() -> TauriPlugin<Wry> {
                 return;
             }
             match action {
-                Some("mini") => windows::toggle_mini(app),
+                Some("mini") => windows::off_main_thread(app, windows::toggle_mini),
                 Some("shot") => crate::capture::start(app, false),
                 Some("selection") => toggle_selection(app),
                 _ => {}
