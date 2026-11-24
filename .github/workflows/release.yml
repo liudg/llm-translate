@@ -134,6 +134,9 @@ jobs:
         with:
           path: src-tauri/target/ort-cache
           key: ort-cache-win-x64-${{ hashFiles('src-tauri/Cargo.lock') }}
+          # Cargo.lock changes on every version bump; an older cache usually holds the same ORT dist.
+          restore-keys: |
+            ort-cache-win-x64-
 
       - name: Cache llama.cpp binaries
         id: cache-llama
@@ -169,6 +172,10 @@ jobs:
           if (-not $dml) {
             Push-Location 'src-tauri'
             try {
+              # rust-cache may restore ort-sys's build-script output as fresh, so cargo would skip
+              # re-running it and never re-download into ort-cache. Drop ort-sys's artifacts to force it.
+              cargo clean --release --locked -p ort-sys
+              if ($LASTEXITCODE -ne 0) { throw "cargo clean -p ort-sys failed" }
               # Trigger ort-sys build script with workspace features (uses src-tauri/.cargo/config.toml)
               # without running llm-translate's tauri-build before runtime DLLs are staged.
               cargo check --release --locked -p oar-ocr
