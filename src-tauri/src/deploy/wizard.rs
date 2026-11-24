@@ -203,7 +203,6 @@ pub async fn deploy_launch(
     let mut candidate = None;
     let result = launch_and_test(&app, &model, &dir, backend, device, threads, &mut candidate).await;
     if result.is_err() {
-        drop(launching);
         // Back to the saved model, not left on the failed candidate (stopped
         // even if it has the saved spec, so a retry starts it afresh), but
         // only while we still own it.
@@ -215,6 +214,9 @@ pub async fn deploy_launch(
                 None => state.sup.stop_if(ours).await,
             }
         }
+        // Only now: a close until here skips its reload (LAUNCHING), so it
+        // cannot claim the spec first and keep the failed process running.
+        drop(launching);
         // Wizard gone: start the saved model now, including when this launch
         // failed before configuring anything (the close skipped its reload
         // because we were running). Else it starts on first use.
@@ -313,13 +315,14 @@ async fn launch_and_test(
         *candidate = Some(owner);
         emit("starting", b, None);
         let t0 = Instant::now();
-        let result = match state.sup.start().await {
-            Ok(port) => {
+        // Started only while we own the spec: the process tested is ours.
+        let result = match state.sup.start_owned(owner).await {
+            Ok((port, running)) => {
                 let load_ms = t0.elapsed().as_millis() as u64;
-                emit("selftest", b, None);
+                emit("selftest", running.backend, None);
                 let t1 = Instant::now();
                 match state.translator.self_test(SELF_TEST, model.clone(), port).await {
-                    Ok(s) if !s.trim().is_empty() => Ok((s, load_ms, t1.elapsed().as_millis() as u64)),
+                    Ok(s) if !s.trim().is_empty() => Ok((s, load_ms, t1.elapsed().as_millis() as u64, running)),
                     Ok(_) => Err("自检失败：翻译结果为空".to_string()),
                     Err(e) => Err(format!("自检失败：{e}")),
                 }
@@ -327,7 +330,13 @@ async fn launch_and_test(
             Err(e) => Err(e),
         };
         match result {
-            Ok((sample, load_ms, translate_ms)) => {
+            Ok((sample, load_ms, translate_ms, running)) => {
+                // A concurrent request may have fallen back to CPU before we
+                // started: save and report what actually passed the test.
+                let (b, d) = (running.backend, running.device);
+                if b != attempt.0 && fallback_reason.is_none() {
+                    fallback_reason = Some("GPU 推理程序运行失败，已自动改用 CPU".to_string());
+                }
                 state
                     .settings
                     .update(|s| {

@@ -286,6 +286,23 @@ impl Supervisor {
         self.start_locked(&mut st).await
     }
 
+    /// `start`, but only while `owner` still owns the spec (checked under the
+    /// lock, so the process cannot be someone else's). Returns the port and
+    /// the spec actually running, which a concurrent request's CPU fallback
+    /// may have changed from the configured one.
+    pub async fn start_owned(self: &Arc<Self>, owner: u64) -> Result<(u16, LaunchSpec), String> {
+        let mut st = self.state.lock().await;
+        if st.owner != owner {
+            return Err("模型已被其他操作切换，本次启动已中止".into());
+        }
+        let port = match (&st.running, self.status()) {
+            (Some(_), Status::Ready { port, .. }) => port,
+            _ => self.start_locked(&mut st).await?,
+        };
+        let spec = st.spec.clone().ok_or("尚未部署模型")?;
+        Ok((port, spec))
+    }
+
     async fn start_locked(self: &Arc<Self>, st: &mut State) -> Result<u16, String> {
         Self::stop_locked(st).await;
         let spec = st.spec.clone().ok_or("尚未部署模型")?;
