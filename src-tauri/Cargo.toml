@@ -1,6 +1,6 @@
 [package]
 name = "llm-translate"
-version = "0.1.5"
+version = "0.1.6"
 description = "Local LLM translator"
 authors = ["you"]
 edition = "2024"
