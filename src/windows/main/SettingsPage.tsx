@@ -21,9 +21,10 @@ import {
   api,
   errorText,
   type AppInfo,
+  type FilterMode,
   type HardwareInfo,
   type HotkeyInfo,
-  type SelectionSettings,
+  type SelectionPatch,
   type Theme,
   type WindowProcess,
 } from "../../lib/api";
@@ -37,6 +38,7 @@ import {
   Card,
   CustomSelect,
   Progress,
+  Segmented,
   Spinner,
   Toggle,
   type SelectOption,
@@ -399,22 +401,33 @@ function ModelSection() {
   );
 }
 
+const FILTER_MODES: { value: FilterMode; label: string }[] = [
+  { value: "blacklist", label: "黑名单模式" },
+  { value: "whitelist", label: "白名单模式" },
+];
+
 function SelectionSection() {
   const settings = useSettings((s) => s.settings);
   const [manual, setManual] = useState("");
   const [error, setError] = useState<string | null>(null);
   if (!settings) return null;
   const sel = settings.selection;
+  const isWhitelist = sel.mode === "whitelist";
+  const listKey = isWhitelist ? "whitelist" : "blacklist";
+  const activeList = sel[listKey];
 
-  const save = (patch: Partial<SelectionSettings>) => {
+  const patch = (p: SelectionPatch) => {
     setError(null);
-    api.setSelection({ ...sel, ...patch }).catch((e) => setError(errorText(e)));
+    api.setSelection(p).catch((e) => setError(errorText(e)));
   };
-  const has = (exe: string) => sel.blacklist.some((b) => b.toLowerCase() === exe.toLowerCase());
+  const has = (exe: string) => activeList.some((b) => b.trim().toLowerCase() === exe.trim().toLowerCase());
   const add = (exe: string) => {
     const name = exe.trim();
     if (!name || has(name)) return;
-    save({ blacklist: [...sel.blacklist, name] });
+    patch({ add: { mode: sel.mode, exe: name } });
+  };
+  const remove = (exe: string) => {
+    patch({ remove: { mode: sel.mode, exe } });
   };
   const addManual = () => {
     let name = manual.trim();
@@ -424,11 +437,6 @@ function SelectionSection() {
     setManual("");
   };
   const off = !sel.enabled;
-  const triggers: { key: "drag" | "doubleClick" | "shiftClick"; title: string; desc: string }[] = [
-    { key: "drag", title: "拖动选择", desc: "拖选文字时触发" },
-    { key: "doubleClick", title: "双击选词", desc: "双击或三击时触发" },
-    { key: "shiftClick", title: "Shift + 单击", desc: "按住 Shift 点选时触发" },
-  ];
 
   return (
     <div className="flex flex-col gap-4">
@@ -436,44 +444,37 @@ function SelectionSection() {
 
       <SettingRow
         title="启用划词翻译"
-        desc="选中文字后在光标旁显示翻译浮标"
+        desc="拖动选中文字后在光标旁显示翻译浮标"
       >
-        <Toggle checked={sel.enabled} onChange={(v) => save({ enabled: v })} />
+        <Toggle checked={sel.enabled} onChange={(v) => patch({ enabled: v })} />
       </SettingRow>
 
-      {/* Trigger gesture cards */}
-      <div className={`grid grid-cols-1 gap-2.5 sm:grid-cols-3 ${off ? "opacity-50" : ""}`}>
-        {triggers.map((t) => (
-          <div
-            key={t.key}
-            className="flex flex-col justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3.5 shadow-[var(--shadow-card)]"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="text-[13px] font-medium text-[var(--ink)]">{t.title}</div>
-              <Toggle checked={sel[t.key]} disabled={off} onChange={(v) => save({ [t.key]: v })} />
-            </div>
-            <div className="text-[11.5px] leading-relaxed text-[var(--ink-secondary)]">{t.desc}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Blacklist manager */}
+      {/* Filter scope manager (blacklist / whitelist) */}
       <Card className={`flex flex-col gap-3.5 p-4 ${off ? "opacity-50" : ""}`}>
-        <div className="flex items-center justify-between gap-2">
-          <div>
+        <div className="flex flex-wrap items-start justify-between gap-2.5">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-[13.5px] font-medium text-[var(--ink)]">
-              <span>应用黑名单</span>
-              <Badge>{sel.blacklist.length}</Badge>
+              <span>生效范围</span>
+              <Badge>{activeList.length}</Badge>
             </div>
-            <div className="mt-0.5 text-xs text-[var(--ink-secondary)]">
-              在这些应用中不触发划词翻译
+            <div className="mt-0.5 text-xs leading-relaxed text-[var(--ink-secondary)]">
+              {isWhitelist
+                ? "仅在以下应用中触发划词翻译；右键翻译浮标可快速移出"
+                : "在所有应用中生效，以下应用除外；右键翻译浮标可快速屏蔽"}
             </div>
           </div>
+          <Segmented
+            size="sm"
+            disabled={off}
+            value={sel.mode}
+            options={FILTER_MODES}
+            onChange={(mode) => patch({ mode })}
+          />
         </div>
 
-        {sel.blacklist.length > 0 ? (
+        {activeList.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {sel.blacklist.map((b) => (
+            {activeList.map((b) => (
               <span
                 key={b}
                 className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] pr-1 pl-2.5 font-mono text-[11.5px] text-[var(--ink)]"
@@ -482,8 +483,8 @@ function SelectionSection() {
                 <button
                   type="button"
                   disabled={off}
-                  title="移出黑名单"
-                  onClick={() => save({ blacklist: sel.blacklist.filter((x) => x !== b) })}
+                  title={isWhitelist ? "移出白名单" : "移出黑名单"}
+                  onClick={() => remove(b)}
                   className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-[var(--ink-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)] disabled:pointer-events-none"
                 >
                   <X className="size-3" />
@@ -493,7 +494,9 @@ function SelectionSection() {
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5 text-xs text-[var(--ink-muted)]">
-            暂无屏蔽程序
+            {isWhitelist
+              ? "尚未添加应用，白名单为空时不会触发划词翻译"
+              : "暂无屏蔽应用（所有支持文字选择的应用均会生效）"}
           </div>
         )}
 

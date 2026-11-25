@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use super::paths;
-use super::settings::{Backend, SelectionSettings, Theme};
+use super::settings::{Backend, FilterMode, Theme};
 use crate::deploy::hardware::{self, HardwareInfo};
 use crate::selection::blacklist::{self, WindowProcess};
 use crate::state::AppState;
@@ -135,11 +135,42 @@ pub async fn open_main_with_text(app: AppHandle, payload: OpenTranslatePayload) 
     let _ = app.emit_to("main", "open-translate", payload);
 }
 
-/// Replace the selection-translation settings; the hook picks them up through
-/// the settings forwarder.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionListEdit {
+    pub mode: FilterMode,
+    pub exe: String,
+}
+
+/// Partial update for selection-translation settings so concurrent or rapid UI
+/// actions (e.g. toggling mode then editing a list) never overwrite each other.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionPatch {
+    pub enabled: Option<bool>,
+    pub mode: Option<FilterMode>,
+    pub add: Option<SelectionListEdit>,
+    pub remove: Option<SelectionListEdit>,
+}
+
+/// Apply a partial update to the selection-translation settings; the hook
+/// picks it up through the settings forwarder.
 #[tauri::command]
-pub fn set_selection(state: State<'_, AppState>, selection: SelectionSettings) -> Result<(), String> {
-    state.settings.save(|s| s.selection = selection)
+pub fn set_selection(state: State<'_, AppState>, patch: SelectionPatch) -> Result<(), String> {
+    state.settings.save(|s| {
+        if let Some(enabled) = patch.enabled {
+            s.selection.enabled = enabled;
+        }
+        if let Some(mode) = patch.mode {
+            s.selection.mode = mode;
+        }
+        if let Some(add) = patch.add {
+            s.selection.add_app(add.mode, &add.exe);
+        }
+        if let Some(remove) = patch.remove {
+            s.selection.remove_app(remove.mode, &remove.exe);
+        }
+    })
 }
 
 /// Start with Windows (HKCU Run, `--minimized`). Read from the registry each

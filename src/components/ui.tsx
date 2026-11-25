@@ -208,12 +208,14 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  disabled = false,
   size = "md",
   className = "",
 }: {
   value: T;
   options: { value: T; label: ReactNode; title?: string; dot?: boolean }[];
   onChange: (v: T) => void;
+  disabled?: boolean;
   size?: "sm" | "md";
   className?: string;
 }) {
@@ -228,11 +230,13 @@ export function Segmented<T extends string>({
         return (
           <button
             key={o.value}
+            type="button"
             role="tab"
+            disabled={disabled}
             aria-selected={active}
             title={o.title}
-            onClick={() => onChange(o.value)}
-            className={`relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[6px] whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 ${h} ${
+            onClick={() => !disabled && onChange(o.value)}
+            className={`relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[6px] whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 disabled:pointer-events-none ${h} ${
               active
                 ? "bg-[var(--bg-elevated)] font-medium text-[var(--ink)] shadow-[var(--shadow-xs)]"
                 : "text-[var(--ink-secondary)] hover:text-[var(--ink)]"

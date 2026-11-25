@@ -63,46 +63,106 @@ impl Default for HotkeySettings {
     }
 }
 
-/// Current settings format. 2: the selection blacklist gained the default
-/// entries below.
-const VERSION: u32 = 2;
+/// Current settings format.
+/// 2: the selection blacklist gained default Android emulators.
+/// 3: UIA + cursor gating replaced the default emulator blacklist; added
+///    blacklist/whitelist mode and removed double-click / Shift+click options.
+const VERSION: u32 = 3;
 
-/// Blacklisted out of the box: Android emulators and screen mirrors, where a
-/// drag is touch input to a game or app and the window looks like any other
-/// to the hook (not full-screen, own cursor). Users may remove them.
-pub const DEFAULT_BLACKLIST: [&str; 8] = [
-    "MuMuNxDevice.exe", // MuMu 12
+/// Legacy defaults added by v2, stripped once on upgrade to v3 so existing
+/// users get a clean list while keeping any entries they added manually.
+/// Because v2 did not store provenance, exact-case matches of these 8 defaults
+/// are treated as v2-injected, while differently-cased entries (e.g. a v1 user
+/// who manually added `nox.exe`, which v2 kept verbatim) are preserved.
+const LEGACY_DEFAULT_BLACKLIST: [&str; 8] = [
+    "MuMuNxDevice.exe",
     "MuMuPlayer.exe",
-    "NemuPlayer.exe", // MuMu 6
-    "dnplayer.exe",   // LDPlayer
-    "HD-Player.exe",  // BlueStacks
+    "NemuPlayer.exe",
+    "dnplayer.exe",
+    "HD-Player.exe",
     "Nox.exe",
     "MEmu.exe",
     "scrcpy.exe",
 ];
 
-/// Selection translation (DESIGN 5.5).
+/// Canonical process-name key shared by filtering, adding, and removal
+/// (trimmed Unicode lowercase, matching Windows case-insensitive file names).
+pub fn normalize_exe(exe: &str) -> String {
+    exe.trim().to_lowercase()
+}
+
+fn same_exe(a: &str, b: &str) -> bool {
+    normalize_exe(a) == normalize_exe(b)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilterMode {
+    /// Active in every app except those in `blacklist`.
+    #[default]
+    Blacklist,
+    /// Active only in apps listed in `whitelist`.
+    Whitelist,
+}
+
+/// Selection translation (DESIGN 5.5): drag to select text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SelectionSettings {
     pub enabled: bool,
-    /// Trigger gestures.
-    pub drag: bool,
-    pub double_click: bool,
-    pub shift_click: bool,
-    /// Process names (`xxx.exe`) where the icon never shows; compared
+    pub mode: FilterMode,
+    /// Process names (`xxx.exe`) excluded in `Blacklist` mode; compared
     /// case-insensitively.
     pub blacklist: Vec<String>,
+    /// Process names (`xxx.exe`) allowed in `Whitelist` mode; compared
+    /// case-insensitively.
+    pub whitelist: Vec<String>,
+}
+
+impl SelectionSettings {
+    fn list_mut(&mut self, mode: FilterMode) -> &mut Vec<String> {
+        match mode {
+            FilterMode::Blacklist => &mut self.blacklist,
+            FilterMode::Whitelist => &mut self.whitelist,
+        }
+    }
+
+    pub fn add_app(&mut self, mode: FilterMode, exe: &str) {
+        let exe = exe.trim();
+        if exe.is_empty() {
+            return;
+        }
+        let list = self.list_mut(mode);
+        if !list.iter().any(|n| same_exe(n, exe)) {
+            list.push(exe.to_string());
+        }
+    }
+
+    pub fn remove_app(&mut self, mode: FilterMode, exe: &str) {
+        let exe = exe.trim();
+        if exe.is_empty() {
+            return;
+        }
+        self.list_mut(mode).retain(|n| !same_exe(n, exe));
+    }
+
+    /// Stop triggering in `exe`: adds it to `blacklist` in Blacklist mode, or
+    /// removes it from `whitelist` in Whitelist mode.
+    pub fn exclude_app(&mut self, exe: &str) {
+        match self.mode {
+            FilterMode::Blacklist => self.add_app(FilterMode::Blacklist, exe),
+            FilterMode::Whitelist => self.remove_app(FilterMode::Whitelist, exe),
+        }
+    }
 }
 
 impl Default for SelectionSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            drag: true,
-            double_click: true,
-            shift_click: true,
-            blacklist: DEFAULT_BLACKLIST.iter().map(|s| s.to_string()).collect(),
+            mode: FilterMode::Blacklist,
+            blacklist: Vec::new(),
+            whitelist: Vec::new(),
         }
     }
 }
@@ -151,12 +211,10 @@ impl Settings {
         if self.version >= VERSION {
             return false;
         }
-        if self.version < 2 {
-            for exe in DEFAULT_BLACKLIST {
-                if !self.selection.blacklist.iter().any(|n| n.eq_ignore_ascii_case(exe)) {
-                    self.selection.blacklist.push(exe.to_string());
-                }
-            }
+        if self.version == 2 {
+            // Exact-case match removes v2-injected defaults while preserving
+            // provably manual entries that kept user casing (e.g. `nox.exe`).
+            self.selection.blacklist.retain(|n| !LEGACY_DEFAULT_BLACKLIST.contains(&n.as_str()));
         }
         tracing::info!("settings migrated from version {} to {VERSION}", self.version);
         self.version = VERSION;
@@ -239,28 +297,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v1_gains_default_blacklist_once() {
+    fn v2_cleans_legacy_defaults_and_keeps_custom() {
+        let mut s: Settings = serde_json::from_str(
+            r#"{"version":2,"selection":{"drag":true,"doubleClick":true,"shiftClick":false,"blacklist":["WINWORD.EXE","MuMuNxDevice.exe","nox.exe","Nox.exe","Code.exe","scrcpy.exe"]}}"#,
+        )
+        .unwrap();
+        assert!(s.migrate());
+        assert_eq!(s.version, VERSION);
+        assert_eq!(s.selection.mode, FilterMode::Blacklist);
+        // Exact-case v2 defaults are removed; differently-cased manual `nox.exe`
+        // from v1 is preserved alongside other custom apps.
+        assert_eq!(s.selection.blacklist, vec!["WINWORD.EXE", "nox.exe", "Code.exe"]);
+        assert!(s.selection.whitelist.is_empty());
+
+        // User re-adding a legacy app later keeps it.
+        s.selection.blacklist.push("scrcpy.exe".into());
+        assert!(!s.migrate());
+        assert_eq!(s.selection.blacklist, vec!["WINWORD.EXE", "nox.exe", "Code.exe", "scrcpy.exe"]);
+    }
+
+    #[test]
+    fn v1_keeps_existing_blacklist_unchanged() {
         let mut s: Settings =
             serde_json::from_str(r#"{"version":1,"selection":{"blacklist":["WINWORD.EXE","nox.exe"]}}"#).unwrap();
         assert!(s.migrate());
         assert_eq!(s.version, VERSION);
-        let bl = &s.selection.blacklist;
-        assert_eq!(bl[0], "WINWORD.EXE");
-        assert!(bl.iter().any(|n| n == "MuMuNxDevice.exe"));
-        // Already present (any case): not duplicated.
-        assert_eq!(bl.iter().filter(|n| n.eq_ignore_ascii_case("nox.exe")).count(), 1);
-        assert_eq!(bl.len(), 1 + DEFAULT_BLACKLIST.len());
-
-        // Entries the user removes later stay removed.
-        s.selection.blacklist.clear();
-        assert!(!s.migrate());
-        assert!(s.selection.blacklist.is_empty());
+        assert_eq!(s.selection.blacklist, vec!["WINWORD.EXE", "nox.exe"]);
     }
 
     #[test]
-    fn fresh_settings_include_defaults() {
+    fn fresh_settings_start_clean() {
         let s = Settings::default();
         assert_eq!(s.version, VERSION);
-        assert_eq!(s.selection.blacklist.len(), DEFAULT_BLACKLIST.len());
+        assert_eq!(s.selection.mode, FilterMode::Blacklist);
+        assert!(s.selection.blacklist.is_empty());
+        assert!(s.selection.whitelist.is_empty());
+    }
+
+    #[test]
+    fn exclude_app_respects_filter_mode_and_unicode_case() {
+        let mut sel = SelectionSettings::default();
+        sel.exclude_app("Code.exe");
+        sel.exclude_app("code.exe");
+        sel.exclude_app("café.exe");
+        sel.exclude_app("CAFÉ.EXE");
+        assert_eq!(sel.blacklist, vec!["Code.exe", "café.exe"]);
+
+        sel.mode = FilterMode::Whitelist;
+        sel.whitelist = vec!["chrome.exe".into(), "Code.exe".into(), "café.exe".into()];
+        sel.exclude_app("code.exe");
+        sel.exclude_app("CAFÉ.exe");
+        assert_eq!(sel.whitelist, vec!["chrome.exe"]);
     }
 }

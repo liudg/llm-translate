@@ -197,14 +197,12 @@ pub fn popup_set_pinned(state: State<'_, PopupState>, pinned: bool) {
     state.0.lock().unwrap().pinned = pinned;
 }
 
-/// Add an executable to the selection blacklist and close the popup.
+/// Exclude an executable from selection translation (adds to blacklist or
+/// removes from whitelist depending on the active filter mode) and close the
+/// popup.
 #[tauri::command]
 pub fn popup_block_app(app: AppHandle, state: State<'_, AppState>, exe: String) -> Result<(), String> {
-    state.settings.save(|s| {
-        if !s.selection.blacklist.iter().any(|n| n.eq_ignore_ascii_case(&exe)) {
-            s.selection.blacklist.push(exe);
-        }
-    })?;
+    state.settings.save(|s| s.selection.exclude_app(&exe))?;
     hide(&app);
     Ok(())
 }

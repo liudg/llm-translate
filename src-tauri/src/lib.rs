@@ -20,7 +20,7 @@ use app::{paths, windows};
 use capture::CaptureState;
 use deploy::manifest::Manifest;
 use inference::supervisor::{Notice, Status, Supervisor};
-use selection::Selection;
+use selection::{Selection, SelectionEvent};
 use state::AppState;
 use translate::scheduler::{BatchEvent, BatchRequest, TranslateEvent, TranslateRequest, Translator};
 
@@ -194,11 +194,25 @@ pub fn run() {
             }
             let spec = state.spec_from_settings(&settings);
             let handle = app.handle().clone();
-            let selection = Selection::start(&settings.selection, move |cap| {
-                if app::tray::deployed(&handle) {
-                    popup::show_capture(&handle, cap);
-                } else {
-                    app::tray::open_primary(&handle);
+            let selection = Selection::start(&settings.selection, move |ev| match ev {
+                SelectionEvent::Captured(cap) => {
+                    if app::tray::deployed(&handle) {
+                        popup::show_capture(&handle, cap);
+                    } else {
+                        app::tray::open_primary(&handle);
+                    }
+                }
+                SelectionEvent::ExcludeApp(exe) => {
+                    tracing::info!("excluding {exe} from selection via icon menu");
+                    if let Err(e) = handle.state::<AppState>().settings.update(|s| s.selection.exclude_app(&exe)) {
+                        tracing::error!("saving selection exclusion failed: {e}");
+                    }
+                }
+                SelectionEvent::DisableSelection => {
+                    tracing::info!("disabling selection via icon menu");
+                    if let Err(e) = handle.state::<AppState>().settings.update(|s| s.selection.enabled = false) {
+                        tracing::error!("saving selection disable failed: {e}");
+                    }
                 }
             })
                 .map(Arc::new)

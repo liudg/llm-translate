@@ -28,13 +28,27 @@ export interface HotkeySettings {
   selection: string | null;
 }
 
+export type FilterMode = "blacklist" | "whitelist";
+
 export interface SelectionSettings {
   enabled: boolean;
-  drag: boolean;
-  doubleClick: boolean;
-  shiftClick: boolean;
-  /** Process names such as `WINWORD.EXE`. */
+  mode: FilterMode;
+  /** Process names excluded in blacklist mode, such as `WINWORD.EXE`. */
   blacklist: string[];
+  /** Process names allowed in whitelist mode, such as `chrome.exe`. */
+  whitelist: string[];
+}
+
+export interface SelectionListEdit {
+  mode: FilterMode;
+  exe: string;
+}
+
+export interface SelectionPatch {
+  enabled?: boolean;
+  mode?: FilterMode;
+  add?: SelectionListEdit;
+  remove?: SelectionListEdit;
 }
 
 export interface WindowProcess {
@@ -262,7 +276,7 @@ export const api = {
   setIdleRelease: (minutes: number) => invoke<void>("set_idle_release", { minutes }),
   setInference: (backend: Backend, device: string | null, threads: number) =>
     invoke<void>("set_inference", { backend, device, threads }),
-  setSelection: (selection: SelectionSettings) => invoke<void>("set_selection", { selection }),
+  setSelection: (patch: SelectionPatch) => invoke<void>("set_selection", { patch }),
   windowProcesses: () => invoke<WindowProcess[]>("window_processes"),
   popupSetHeight: (height: number) => invoke<void>("popup_set_height", { height }),
   popupSetPinned: (pinned: boolean) => invoke<void>("popup_set_pinned", { pinned }),

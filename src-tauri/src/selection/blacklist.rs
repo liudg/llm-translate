@@ -1,5 +1,6 @@
 //! Which foreground windows get the selection icon: not our own windows, not
-//! blacklisted processes, not the desktop/taskbar, not full-screen apps.
+//! filtered out by the blacklist/whitelist, not the desktop/taskbar, not
+//! full-screen apps.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -11,6 +12,8 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Shell::{QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, PWSTR};
+
+use crate::app::settings::{FilterMode, normalize_exe};
 
 /// Shell windows where selecting text is not a thing (desktop icons, taskbar).
 const SHELL_CLASSES: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
@@ -106,13 +109,46 @@ pub enum Skip {
     OwnApp,
     Shell,
     Blacklisted(String),
+    NotWhitelisted(Option<String>),
     FullScreen,
 }
 
 /// Lower-cased process names.
-pub type Blacklist = HashSet<String>;
+pub type ProcessSet = HashSet<String>;
 
-pub fn check(fg: HWND, blacklist: &Blacklist) -> Result<(), Skip> {
+#[derive(Debug, Clone, Default)]
+pub struct Filter {
+    pub mode: FilterMode,
+    pub blacklist: ProcessSet,
+    pub whitelist: ProcessSet,
+}
+
+impl Filter {
+    pub fn allows(&self, exe: Option<&str>) -> Result<(), Skip> {
+        match self.mode {
+            FilterMode::Blacklist => {
+                if !self.blacklist.is_empty()
+                    && let Some(name) = exe
+                    && self.blacklist.contains(&normalize_exe(name))
+                {
+                    return Err(Skip::Blacklisted(name.to_string()));
+                }
+                Ok(())
+            }
+            FilterMode::Whitelist => {
+                if exe.is_some_and(|name| self.whitelist.contains(&normalize_exe(name))) {
+                    Ok(())
+                } else {
+                    Err(Skip::NotWhitelisted(exe.map(str::to_string)))
+                }
+            }
+        }
+    }
+}
+
+/// Check whether `fg` is eligible for the selection icon, returning its
+/// executable name when allowed.
+pub fn check(fg: HWND, filter: &Filter) -> Result<Option<String>, Skip> {
     let pid = window_pid(fg);
     if pid == std::process::id() {
         return Err(Skip::OwnApp);
@@ -120,17 +156,12 @@ pub fn check(fg: HWND, blacklist: &Blacklist) -> Result<(), Skip> {
     if SHELL_CLASSES.contains(&class_name(fg).as_str()) {
         return Err(Skip::Shell);
     }
-    if !blacklist.is_empty() {
-        if let Some(name) = process_name(pid) {
-            if blacklist.contains(&name.to_lowercase()) {
-                return Err(Skip::Blacklisted(name));
-            }
-        }
-    }
+    let exe = process_name(pid);
+    filter.allows(exe.as_deref())?;
     if fullscreen_exclusive() {
         return Err(Skip::FullScreen);
     }
-    Ok(())
+    Ok(exe)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -172,4 +203,29 @@ pub fn window_processes() -> Vec<WindowProcess> {
         by_exe.entry(exe.to_lowercase()).or_insert(WindowProcess { exe, title });
     }
     by_exe.into_values().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set(items: &[&str]) -> ProcessSet {
+        items.iter().map(|s| s.to_lowercase()).collect()
+    }
+
+    #[test]
+    fn blacklist_mode_blocks_listed_case_insensitively() {
+        let f = Filter { mode: FilterMode::Blacklist, blacklist: set(&["Code.exe"]), whitelist: set(&["chrome.exe"]) };
+        assert_eq!(f.allows(Some("chrome.exe")), Ok(()));
+        assert_eq!(f.allows(None), Ok(()));
+        assert_eq!(f.allows(Some("CODE.EXE")), Err(Skip::Blacklisted("CODE.EXE".into())));
+    }
+
+    #[test]
+    fn whitelist_mode_allows_only_listed_case_insensitively() {
+        let f = Filter { mode: FilterMode::Whitelist, blacklist: set(&["chrome.exe"]), whitelist: set(&["Chrome.exe"]) };
+        assert_eq!(f.allows(Some("CHROME.EXE")), Ok(()));
+        assert_eq!(f.allows(Some("notepad.exe")), Err(Skip::NotWhitelisted(Some("notepad.exe".into()))));
+        assert_eq!(f.allows(None), Err(Skip::NotWhitelisted(None)));
+    }
 }
