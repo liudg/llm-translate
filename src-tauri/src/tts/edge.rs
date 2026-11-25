@@ -34,7 +34,7 @@ impl std::fmt::Display for EdgeError {
         match self {
             Self::Cancelled => write!(f, "已停止朗读"),
             Self::Network(m) => write!(f, "朗读连接失败：{m}"),
-            Self::Rejected(m) => write!(f, "微软语音服务拒绝连接：{m}"),
+            Self::Rejected(m) => write!(f, "语音服务拒绝连接：{m}"),
             Self::Protocol(m) => write!(f, "语音服务响应异常：{m}"),
             Self::NoAudio => write!(f, "未收到音频数据，该文本可能无法朗读"),
         }

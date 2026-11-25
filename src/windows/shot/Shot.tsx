@@ -12,10 +12,9 @@ import { SpeakButton } from "../../components/tts";
 import { startInferenceSync, useInference } from "../../stores/inference";
 import { drawParagraph } from "./render";
 
-/** Toolbar strip in DIPs: 4 px gap + 40 px bar (matches TOOLBAR_HEIGHT = 44 in capture/mod.rs). */
-const BAR_GAP = 4;
+/** Toolbar dimensions in CSS pixels (must match BAR_* constants in capture/mod.rs). */
 const BAR_HEIGHT = 40;
-const BAR_MIN_WIDTH = 392;
+const BAR_MIN_WIDTH = 400;
 const BAR_MAX_WIDTH = 552;
 
 type Phase = "ocr" | "translating" | "done" | "error" | "cancelled";
@@ -280,37 +279,23 @@ export default function Shot() {
   }
 
   const dpr = shot.cssScale;
-  const imgLeft = shot.imageX / dpr;
-  const imgWidth = shot.width / dpr;
-  const imgHeight = shot.height / dpr;
-  const imgStyle = {
-    left: imgLeft,
+  const imgStyle: CSSProperties = {
+    left: shot.imageX / dpr,
     top: shot.imageY / dpr,
-    width: imgWidth,
-    height: imgHeight,
+    width: shot.width / dpr,
+    height: shot.height / dpr,
   };
-  const winWidth = Math.max(imgWidth, BAR_MIN_WIDTH);
-  const inside = shot.toolbar === "inside";
-  const inset = inside ? BAR_GAP : 0;
-  const availWidth = Math.max(0, winWidth - inset * 2);
-  const minBarWidth = Math.min(BAR_MIN_WIDTH, availWidth);
-  const rightEdge = Math.min(winWidth - inset, Math.max(inset + minBarWidth, imgLeft + imgWidth - inset));
-  const rightOffset = Math.max(inset, winWidth - rightEdge);
+  const trackWidth = shot.barWidth / dpr;
+  const trackStyle: CSSProperties = {
+    left: shot.barX / dpr,
+    top: shot.barY / dpr,
+    width: trackWidth,
+    height: BAR_HEIGHT,
+  };
   const barStyle: CSSProperties = {
     height: BAR_HEIGHT,
-    right: rightOffset,
-    minWidth: inside ? `min(${BAR_MIN_WIDTH}px, calc(100% - ${BAR_GAP * 2}px))` : `min(${BAR_MIN_WIDTH}px, 100%)`,
-    maxWidth:
-      rightOffset > inset
-        ? Math.min(BAR_MAX_WIDTH, rightEdge - inset)
-        : inside
-          ? `min(${BAR_MAX_WIDTH}px, calc(100% - ${BAR_GAP * 2}px))`
-          : `min(${BAR_MAX_WIDTH}px, 100%)`,
-    ...(shot.toolbar === "below"
-      ? { top: imgHeight + BAR_GAP }
-      : shot.toolbar === "above"
-        ? { top: 0 }
-        : { bottom: BAR_GAP }),
+    minWidth: Math.min(BAR_MIN_WIDTH, trackWidth),
+    maxWidth: Math.min(BAR_MAX_WIDTH, trackWidth),
   };
 
   const hasTranslations = translations.length > 0;
@@ -331,10 +316,14 @@ export default function Shot() {
 
       {/* Floating Precision Editorial HUD Bar */}
       <div
-        data-tauri-drag-region
-        className="absolute flex w-max min-w-[392px] max-w-[552px] items-center gap-1 overflow-hidden rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-surface)]/96 px-1.5 text-xs text-[var(--ink)] shadow-[0_8px_22px_rgb(0_0_0/0.22)]"
-        style={barStyle}
+        className={`pointer-events-none absolute flex ${shot.barAlignRight ? "justify-end" : "justify-start"}`}
+        style={trackStyle}
       >
+        <div
+          data-tauri-drag-region
+          className="pointer-events-auto relative flex w-max items-center gap-1 overflow-hidden rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-surface)]/96 px-1.5 text-xs text-[var(--ink)] shadow-[0_3px_10px_rgb(0_0_0/0.14),0_1px_2px_rgb(0_0_0/0.08)] dark:shadow-[0_3px_10px_rgb(0_0_0/0.40),0_1px_2px_rgb(0_0_0/0.24)]"
+          style={barStyle}
+        >
         {/* Subtle drag handle & live status */}
         <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-1.5 truncate pr-1 pl-0.5">
           <GripVertical className="pointer-events-none size-3.5 shrink-0 text-[var(--ink-muted)] opacity-70" />
@@ -478,6 +467,7 @@ export default function Shot() {
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

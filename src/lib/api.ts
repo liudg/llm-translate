@@ -254,6 +254,10 @@ export interface ShotPayload {
   height: number;
   imageX: number;
   imageY: number;
+  barX: number;
+  barY: number;
+  barWidth: number;
+  barAlignRight: boolean;
   toolbar: "below" | "above" | "inside";
   /** DPI scale of the capture monitor. */
   scale: number;

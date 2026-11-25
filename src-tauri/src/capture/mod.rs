@@ -25,13 +25,19 @@ use ocr::Ocr;
 use overlay::Overlay;
 
 pub const LABEL: &str = "shot";
-/// Toolbar strip height and minimum width in DIPs (must match Shot.tsx).
-const TOOLBAR_HEIGHT: f64 = 44.0;
-const TOOLBAR_MIN_WIDTH: f64 = 392.0;
+/// Toolbar geometry in CSS pixels (must match Shot.tsx).
+const BAR_GAP: f64 = 4.0;
+const BAR_HEIGHT: f64 = 40.0;
+const BAR_MIN_WIDTH: f64 = 400.0;
+const BAR_MAX_WIDTH: f64 = 552.0;
+/// Transparent margin around the floating toolbar so its drop shadow and border
+/// are never clipped by the frameless window bounds.
+const SHADOW_PAD_X: f64 = 16.0;
+const SHADOW_PAD_Y: f64 = 18.0;
 /// Closes the overlay if the page never reports that it has drawn.
 const OVERLAY_FALLBACK: Duration = Duration::from_secs(3);
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolbarPlace {
     Below,
@@ -47,9 +53,15 @@ pub struct ShotPayload {
     pub id: u64,
     pub width: u32,
     pub height: u32,
-    /// Image position inside the window (the toolbar may be wider or above).
+    /// Image position inside the window (the toolbar or its shadow pad may extend beyond it).
     pub image_x: u32,
     pub image_y: u32,
+    /// Toolbar track inside the window (physical pixels).
+    pub bar_x: u32,
+    pub bar_y: u32,
+    pub bar_width: u32,
+    /// Align the toolbar to the right edge of its track (wide image or near monitor right edge).
+    pub bar_align_right: bool,
     pub toolbar: ToolbarPlace,
     /// DPI scale of the capture monitor.
     pub scale: f64,
@@ -197,36 +209,97 @@ fn session(app: &AppHandle, state: &CaptureState, minimize_main: bool) {
     });
 }
 
-/// Result window rectangle and the image's place in it: the image keeps its
-/// screen position; the toolbar goes below it, else above, else over it.
+/// Result window rectangle and the image/toolbar tracks inside it: the image
+/// keeps its exact screen position while the transparent window extends around
+/// the floating toolbar so its border and drop shadow are never clipped.
 fn geometry(id: u64, image: RECT, frame: &screen::Frame) -> (RECT, ShotPayload) {
-    let s = frame.scale as f64;
-    let css = s * crate::app::windows::text_scale();
+    geometry_for(id, image, frame.rect, frame.work, frame.scale as f64, crate::app::windows::text_scale())
+}
+
+fn geometry_for(
+    id: u64,
+    image: RECT,
+    rect: RECT,
+    work: RECT,
+    scale: f64,
+    text_scale: f64,
+) -> (RECT, ShotPayload) {
+    let css = scale * text_scale;
     let (w, h) = (image.right - image.left, image.bottom - image.top);
-    let bar = (TOOLBAR_HEIGHT * css).round() as i32;
-    let win_w = w.max((TOOLBAR_MIN_WIDTH * css).round() as i32);
-    let (mut left, mut image_x) = (image.left, 0);
-    if left + win_w > frame.rect.right {
-        left = image.right - win_w;
-        image_x = win_w - w;
-    }
-    let work = frame.work;
-    let (top, image_y, win_h, toolbar) = if image.bottom + bar <= work.bottom {
-        (image.top, 0, h + bar, ToolbarPlace::Below)
-    } else if image.top - bar >= work.top {
-        (image.top - bar, bar, h + bar, ToolbarPlace::Above)
+    let gap = (BAR_GAP * css).ceil() as i32;
+    let bar_h = (BAR_HEIGHT * css).ceil() as i32;
+    let bar_min_w = (BAR_MIN_WIDTH * css).ceil() as i32;
+    let bar_max_w = (BAR_MAX_WIDTH * css).ceil() as i32;
+    let pad_x = (SHADOW_PAD_X * css).ceil() as i32;
+    let pad_y = (SHADOW_PAD_Y * css).ceil() as i32;
+    let frame_w = (rect.right - rect.left).max(1);
+    let effective_min_w = bar_min_w.min(frame_w);
+
+    // 1. Vertical placement: prefer Below/Above with full shadow room, then tight Below/Above, else Inside.
+    let (toolbar, bar_top, win_top, win_bottom) =
+        if image.bottom + gap + bar_h <= work.bottom && image.bottom + gap + bar_h + pad_y <= rect.bottom {
+            let bt = image.bottom + gap;
+            (ToolbarPlace::Below, bt, image.top, bt + bar_h + pad_y)
+        } else if image.top - gap - bar_h >= work.top && image.top - gap - bar_h - pad_y >= rect.top {
+            let bt = image.top - gap - bar_h;
+            (ToolbarPlace::Above, bt, bt - pad_y, image.bottom)
+        } else if image.bottom + gap + bar_h <= work.bottom {
+            let bt = image.bottom + gap;
+            (ToolbarPlace::Below, bt, image.top, (bt + bar_h + pad_y).min(rect.bottom))
+        } else if image.top - gap - bar_h >= work.top {
+            let bt = image.top - gap - bar_h;
+            (ToolbarPlace::Above, bt, (bt - pad_y).max(rect.top), image.bottom)
+        } else {
+            let bb = (image.bottom - gap).max(image.top + bar_h).min(rect.bottom);
+            let bt = (bb - bar_h).max(rect.top);
+            let wt = image.top.min(bt - pad_y).max(rect.top);
+            let wb = image.bottom.max(bb + pad_y).min(rect.bottom);
+            (ToolbarPlace::Inside, bt, wt, wb)
+        };
+
+    // 2. Horizontal toolbar track [track_left, track_right] in screen pixels.
+    let inside_inset = if matches!(toolbar, ToolbarPlace::Inside) { gap } else { 0 };
+    let (track_left, track_right, bar_align_right) = if w >= effective_min_w + inside_inset * 2 {
+        let track_w = (w - inside_inset * 2).min(bar_max_w);
+        let right = image.right - inside_inset;
+        (right - track_w, right, true)
+    } else if image.left + effective_min_w + pad_x <= rect.right {
+        (image.left, image.left + effective_min_w, false)
+    } else if image.right - effective_min_w - pad_x >= rect.left {
+        (image.right - effective_min_w, image.right, true)
+    } else if image.left + effective_min_w <= rect.right {
+        (image.left, image.left + effective_min_w, false)
     } else {
-        (image.top, 0, h.max(bar), ToolbarPlace::Inside)
+        let right = image.right.min(rect.right);
+        let left = (right - effective_min_w).max(rect.left);
+        let right = (left + effective_min_w).min(rect.right);
+        (left, right, true)
     };
-    let window = RECT { left, top, right: left + win_w, bottom: top + win_h };
+
+    // 3. Window horizontal bounds: union of image and padded toolbar track, clamped to monitor.
+    let win_left = image.left.min(track_left - pad_x).max(rect.left);
+    let win_right = image.right.max(track_right + pad_x).min(rect.right);
+    let safe_left = track_left.clamp(win_left, win_right);
+    let safe_right = track_right.clamp(safe_left, win_right);
+
+    let window = RECT {
+        left: win_left,
+        top: win_top,
+        right: win_right.max(win_left + 1),
+        bottom: win_bottom.max(win_top + 1),
+    };
     let payload = ShotPayload {
         id,
         width: w as u32,
         height: h as u32,
-        image_x: image_x as u32,
-        image_y: image_y as u32,
+        image_x: (image.left - win_left) as u32,
+        image_y: (image.top - win_top) as u32,
+        bar_x: (safe_left - win_left) as u32,
+        bar_y: (bar_top - win_top).max(0) as u32,
+        bar_width: (safe_right - safe_left) as u32,
+        bar_align_right,
         toolbar,
-        scale: s,
+        scale,
         css_scale: css,
     };
     (window, payload)
@@ -335,5 +408,103 @@ pub async fn shot_copy_image(app: AppHandle, request: Request<'_>) -> Result<(),
         Ok(())
     } else {
         Err("无法打开剪贴板".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT { left, top, right, bottom }
+    }
+
+    #[test]
+    fn narrow_below_reserves_shadow_padding_and_keeps_image_fixed() {
+        // Exact repro of 499x143 at (996, 434) on 3840x2160 @ 150% DPI, 125% text scale.
+        let screen = rect(0, 0, 3840, 2160);
+        let work = rect(0, 0, 3840, 2088);
+        let img = rect(996, 434, 996 + 499, 434 + 143);
+        let (win, p) = geometry_for(1, img, screen, work, 1.5, 1.25);
+
+        let css = 1.875;
+        let pad_x = (SHADOW_PAD_X * css).ceil() as i32;
+        let pad_y = (SHADOW_PAD_Y * css).ceil() as i32;
+        let bar_h = (BAR_HEIGHT * css).ceil() as i32;
+        let bar_min_w = (BAR_MIN_WIDTH * css).ceil() as i32;
+
+        assert_eq!(p.toolbar, ToolbarPlace::Below);
+        assert!(!p.bar_align_right);
+        // Image keeps exact screen coordinates.
+        assert_eq!(win.left + p.image_x as i32, img.left);
+        assert_eq!(win.top + p.image_y as i32, img.top);
+        // Toolbar aligns with image left and has full shadow padding on left, right and bottom.
+        assert_eq!(p.bar_x, p.image_x);
+        assert_eq!(p.bar_width as i32, bar_min_w);
+        assert!(p.bar_x as i32 >= pad_x);
+        assert!((win.right - win.left) - (p.bar_x + p.bar_width) as i32 >= pad_x);
+        assert!((win.bottom - win.top) - (p.bar_y as i32 + bar_h) >= pad_y);
+    }
+
+    #[test]
+    fn narrow_near_right_edge_flips_and_stays_in_monitor() {
+        let screen = rect(0, 0, 1920, 1080);
+        let work = rect(0, 0, 1920, 1040);
+        let img = rect(1700, 200, 1880, 320);
+        let (win, p) = geometry_for(2, img, screen, work, 1.0, 1.0);
+
+        assert_eq!(p.toolbar, ToolbarPlace::Below);
+        assert!(p.bar_align_right);
+        assert_eq!(win.left + p.image_x as i32, img.left);
+        assert_eq!(win.left + (p.bar_x + p.bar_width) as i32, img.right);
+        assert!(win.left >= screen.left && win.right <= screen.right);
+        assert!(p.bar_x >= SHADOW_PAD_X as u32);
+        assert!((win.right - win.left) - (p.bar_x + p.bar_width) as i32 >= SHADOW_PAD_X as i32);
+    }
+
+    #[test]
+    fn wide_image_right_aligns_bar_without_extra_left_margin() {
+        let screen = rect(0, 0, 2560, 1440);
+        let work = rect(0, 0, 2560, 1392);
+        let img = rect(300, 200, 1500, 500);
+        let (win, p) = geometry_for(3, img, screen, work, 1.0, 1.0);
+
+        assert_eq!(p.toolbar, ToolbarPlace::Below);
+        assert!(p.bar_align_right);
+        assert_eq!(win.left, img.left);
+        assert_eq!(p.image_x, 0);
+        assert_eq!(p.bar_width, BAR_MAX_WIDTH as u32);
+        assert_eq!(win.left + (p.bar_x + p.bar_width) as i32, img.right);
+        assert_eq!(win.right, img.right + SHADOW_PAD_X as i32);
+    }
+
+    #[test]
+    fn near_bottom_places_toolbar_above_with_top_shadow_padding() {
+        let screen = rect(0, 0, 1920, 1080);
+        let work = rect(0, 0, 1920, 1040);
+        let img = rect(400, 900, 700, 1030);
+        let (win, p) = geometry_for(4, img, screen, work, 1.0, 1.0);
+
+        assert_eq!(p.toolbar, ToolbarPlace::Above);
+        assert_eq!(win.left + p.image_x as i32, img.left);
+        assert_eq!(win.top + p.image_y as i32, img.top);
+        assert_eq!(p.bar_y, SHADOW_PAD_Y as u32);
+        assert!(p.bar_y + BAR_HEIGHT as u32 + BAR_GAP as u32 == p.image_y);
+    }
+
+    #[test]
+    fn full_height_places_toolbar_inside_and_never_underflows() {
+        let screen = rect(0, 0, 1920, 1080);
+        let work = rect(0, 0, 1920, 1040);
+        let img = rect(0, 0, 1920, 1040);
+        let (win, p) = geometry_for(5, img, screen, work, 1.0, 1.0);
+
+        assert_eq!(p.toolbar, ToolbarPlace::Inside);
+        assert!(p.bar_align_right);
+        assert!(win.left >= screen.left && win.right <= screen.right);
+        assert!(win.top >= screen.top && win.bottom <= screen.bottom);
+        assert_eq!(p.image_x, 0);
+        assert_eq!(p.image_y, 0);
+        assert!(p.bar_x + p.bar_width <= (win.right - win.left) as u32);
     }
 }

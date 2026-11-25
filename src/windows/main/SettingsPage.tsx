@@ -421,7 +421,7 @@ const TTS_RATES: { value: string; label: string; rate: number }[] = [
 ];
 
 const PREVIEW_EN = "Hello! Welcome to LLM Translate. Clear pronunciation makes reading effortless.";
-const PREVIEW_ZH = "你好，欢迎使用本地大模型翻译，微软神经语音让朗读自然流畅。";
+const PREVIEW_ZH = "你好，欢迎使用 LLM Translate，清晰的发音让阅读更轻松。";
 
 function TtsSection({ active }: { active: boolean }) {
   const settings = useSettings((s) => s.settings);
@@ -480,7 +480,7 @@ function TtsSection({ active }: { active: boolean }) {
       <SectionHeader title="语音朗读" />
 
       <div className="flex flex-col gap-2.5">
-        <SettingRow title="英文音色" desc="朗读英文原文或译文时使用的微软神经语音">
+        <SettingRow title="英文音色">
           <CustomSelect
             value={cfg.enVoice}
             options={enOptions}
@@ -501,7 +501,7 @@ function TtsSection({ active }: { active: boolean }) {
           />
         </SettingRow>
 
-        <SettingRow title="中文音色" desc="朗读中文原文或译文时使用的微软神经语音">
+        <SettingRow title="中文音色">
           <CustomSelect
             value={cfg.zhVoice}
             options={zhOptions}
@@ -522,7 +522,7 @@ function TtsSection({ active }: { active: boolean }) {
           />
         </SettingRow>
 
-        <SettingRow title="朗读语速" desc="由语音引擎原生调节语速，自然不变调">
+        <SettingRow title="朗读语速">
           <Segmented
             size="sm"
             value={closestRate}
@@ -534,10 +534,7 @@ function TtsSection({ active }: { active: boolean }) {
           />
         </SettingRow>
 
-        <SettingRow
-          title="划词自动朗读"
-          desc="打开划词浮窗时自动朗读选中的原文，可随时点击按钮停止"
-        >
+        <SettingRow title="划词自动朗读" desc="划词翻译时自动朗读原文">
           <Toggle checked={cfg.popupAutoSpeak} onChange={(v) => patch({ popupAutoSpeak: v })} />
         </SettingRow>
       </div>
@@ -547,10 +544,6 @@ function TtsSection({ active }: { active: boolean }) {
           {saveError ?? previewError}
         </div>
       )}
-
-      <p className="px-1 text-xs leading-relaxed text-[var(--ink-muted)]">
-        朗读通过直连微软 Edge 在线神经语音服务实现，仅在点击朗读或开启划词自动朗读时联网请求；翻译本身仍完全离线运行。
-      </p>
     </div>
   );
 }
