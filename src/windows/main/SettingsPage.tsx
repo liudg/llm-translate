@@ -15,7 +15,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  ShieldCheck,
   X,
 } from "lucide-react";
 import {
@@ -60,11 +59,10 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: typeof Palette }[] 
   { id: "about", label: "关于与更新", icon: Info },
 ];
 
-function SectionHeader({ title, desc }: { title: string; desc: string }) {
+function SectionHeader({ title }: { title: string }) {
   return (
     <div className="mb-4">
       <h2 className="text-base font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
-      <p className="mt-0.5 text-xs text-[var(--ink-secondary)]">{desc}</p>
     </div>
   );
 }
@@ -96,13 +94,11 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
   const choices: {
     id: Theme;
     label: string;
-    sub: string;
     preview: ReactNode;
   }[] = [
     {
       id: "system",
       label: "跟随系统",
-      sub: "自动同步 Windows 深浅色",
       preview: (
         <div className="relative flex h-12 w-full overflow-hidden rounded-lg border border-[var(--border)]">
           <div className="flex flex-1 flex-col gap-1 bg-[#f4f1ea] p-2">
@@ -121,7 +117,6 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
     {
       id: "light",
       label: "宣纸浅色",
-      sub: "温润素笺，日间清晰耐读",
       preview: (
         <div className="flex h-12 w-full flex-col gap-1.5 rounded-lg border border-[#e3ded3] bg-[#f4f1ea] p-2">
           <div className="flex items-center gap-1.5">
@@ -138,7 +133,6 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
     {
       id: "dark",
       label: "墨砚深色",
-      sub: "深炭暖墨，夜间柔和护眼",
       preview: (
         <div className="flex h-12 w-full flex-col gap-1.5 rounded-lg border border-[#2c2a26] bg-[#121110] p-2">
           <div className="flex items-center gap-1.5">
@@ -156,11 +150,8 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
 
   return (
     <Card className="p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <div className="text-[13.5px] font-medium text-[var(--ink)]">外观主题</div>
-          <div className="mt-0.5 text-xs text-[var(--ink-secondary)]">所有窗口实时同步切换</div>
-        </div>
+      <div className="mb-3">
+        <div className="text-[13.5px] font-medium text-[var(--ink)]">外观主题</div>
       </div>
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
         {choices.map((c) => {
@@ -187,7 +178,6 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
                   </span>
                 )}
               </div>
-              <div className="px-0.5 text-[11px] text-[var(--ink-muted)]">{c.sub}</div>
             </button>
           );
         })}
@@ -227,11 +217,11 @@ function ModelSection() {
       {
         value: "cpu",
         label: "CPU 推理",
-        desc: hw ? `${hw.cpu.name}（${hw.cpu.physicalCores} 核）` : "通用兼容模式",
+        desc: hw ? `${hw.cpu.name}（${hw.cpu.physicalCores} 核）` : "通用模式",
       },
     ];
     if (savedKey === "vulkan:") {
-      list.push({ value: "vulkan:", label: "GPU · 自动选择", desc: "由 llama.cpp 自动挑选 Vulkan 设备" });
+      list.push({ value: "vulkan:", label: "GPU · 自动选择", desc: "自动选择可用显卡" });
     }
     if (hw) {
       for (const g of hw.gpus) {
@@ -239,7 +229,7 @@ function ModelSection() {
           value: `vulkan:${g.id}`,
           label: `GPU · ${g.name}`,
           desc: `显存 ${mbToGb(g.totalMb)}${g.freeMb > 0 ? `（可用 ${mbToGb(g.freeMb)}）` : ""}`,
-          badge: g.integrated ? "核显" : "Vulkan",
+          badge: g.integrated ? "核显" : "独显",
         });
       }
     }
@@ -293,10 +283,7 @@ function ModelSection() {
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionHeader
-        title="模型与推理"
-        desc="所有翻译均在本地 GGUF 模型上运行，支持多档位随时切换与断点续传下载"
-      />
+      <SectionHeader title="模型与推理" />
 
       <ModelList onBusy={onBusy} />
 
@@ -310,10 +297,10 @@ function ModelSection() {
           }
           desc={
             hw === null
-              ? "正在检测本机显卡与 Vulkan 设备…"
+              ? "正在检测可用显卡…"
               : hw.gpus.length === 0
-                ? `未检测到可用的 Vulkan 显卡${hw.listDevicesError ? `（${hw.listDevicesError}）` : ""}`
-                : "切换后端后将重新加载模型；若 GPU 多次失败会自动退回 CPU"
+                ? `未检测到可用显卡${hw.listDevicesError ? `（${hw.listDevicesError}）` : ""}`
+                : "切换后会重新加载模型"
           }
         >
           {hw === null && <Spinner className="size-3.5 text-[var(--ink-muted)]" />}
@@ -331,8 +318,8 @@ function ModelSection() {
             title="CPU 线程数"
             desc={
               hw
-                ? `本机 ${hw.cpu.physicalCores} 个物理核心 / ${hw.cpu.logicalCores} 个逻辑核心，通常设为物理核心数速度最快`
-                : "设置 CPU 推理使用的线程数量"
+                ? `建议设为物理核心数（当前 ${hw.cpu.physicalCores} 核）`
+                : "设置 CPU 推理使用的线程数"
             }
           >
             <CustomSelect
@@ -350,7 +337,7 @@ function ModelSection() {
               <span className="mr-auto text-xs text-[var(--danger)]">{error}</span>
             ) : (
               <span className="mr-auto text-xs font-medium text-[var(--accent-text)]">
-                推理配置已更改，应用后将重启本地推理进程
+                配置已更改，应用后生效
               </span>
             )}
             {dirty && (
@@ -376,7 +363,7 @@ function ModelSection() {
 
         <SettingRow
           title="闲置自动释放"
-          desc="长时间未翻译时自动关闭推理进程以释放显存 / 内存，下次翻译时自动冷启动"
+          desc="空闲一段时间后释放显存和内存，下次翻译时自动恢复"
         >
           <CustomSelect
             value={settings.idleReleaseMinutes}
@@ -438,30 +425,21 @@ function SelectionSection() {
   };
   const off = !sel.enabled;
   const triggers: { key: "drag" | "doubleClick" | "shiftClick"; title: string; desc: string }[] = [
-    { key: "drag", title: "拖动选择", desc: "按住左键拖选文字后松开触发" },
-    { key: "doubleClick", title: "双击选词", desc: "双击选词（三击选段同样触发）" },
-    { key: "shiftClick", title: "Shift + 单击", desc: "按住 Shift 单击扩展选区时触发" },
+    { key: "drag", title: "拖动选择", desc: "拖选文字时触发" },
+    { key: "doubleClick", title: "双击选词", desc: "双击或三击时触发" },
+    { key: "shiftClick", title: "Shift + 单击", desc: "按住 Shift 点选时触发" },
   ];
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionHeader
-        title="划词翻译"
-        desc="在任意应用选中文字后于光标旁弹出「译」图标，点击后即时流式翻译"
-      />
+      <SectionHeader title="划词翻译" />
 
       <SettingRow
         title="启用划词翻译"
-        desc="关闭后系统托盘图标将变为灰色；支持通过全局快捷键一键开关"
+        desc="选中文字后在光标旁显示翻译浮标"
       >
         <Toggle checked={sel.enabled} onChange={(v) => save({ enabled: v })} />
       </SettingRow>
-
-      {/* Terminal safety note */}
-      <div className="flex items-center gap-2.5 rounded-xl border border-[var(--good)]/20 bg-[var(--good-soft)] px-3.5 py-2.5 text-xs text-[var(--good)]">
-        <ShieldCheck className="size-4 shrink-0" />
-        <span>优先通过 Windows UIA 读取选区，兜底仅用 Ctrl+Insert，绝不发送 Ctrl+C，终端内使用绝对安全。</span>
-      </div>
 
       {/* Trigger gesture cards */}
       <div className={`grid grid-cols-1 gap-2.5 sm:grid-cols-3 ${off ? "opacity-50" : ""}`}>
@@ -488,7 +466,7 @@ function SelectionSection() {
               <Badge>{sel.blacklist.length}</Badge>
             </div>
             <div className="mt-0.5 text-xs text-[var(--ink-secondary)]">
-              在这些进程中选中文字时不会显示划词图标（按进程名忽略大小写匹配）
+              在这些应用中不触发划词翻译
             </div>
           </div>
         </div>
@@ -526,7 +504,7 @@ function SelectionSection() {
             disabled={off}
             onChange={(e) => setManual(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addManual()}
-            placeholder="或输入进程名，如 notepad.exe"
+            placeholder="或输入程序名，如 notepad.exe"
             spellCheck={false}
             className="h-8 min-w-[180px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] px-2.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-muted)] focus:border-[var(--accent)] focus:bg-[var(--bg-elevated)] focus:ring-2 focus:ring-[var(--accent-ring)]"
           />
@@ -630,7 +608,7 @@ function ProcessPicker({
               ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="筛选进程名或窗口标题…"
+              placeholder="搜索应用或窗口标题…"
               className="min-w-0 flex-1 bg-transparent text-xs text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
             />
           </div>
@@ -716,10 +694,7 @@ function AboutSection({ info }: { info: AppInfo | null }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionHeader
-        title="关于与更新"
-        desc="纯本地离线中英互译桌面工具，数据与翻译记录均留在你的电脑上"
-      />
+      <SectionHeader title="关于与更新" />
 
       {/* Brand Identity & Updater Hero Card */}
       <Card className="flex flex-col gap-3.5 p-5">
@@ -731,15 +706,9 @@ function AboutSection({ info }: { info: AppInfo | null }) {
               {info && <Badge tone="neutral">v{info.version}</Badge>}
               {avail && <Badge tone="accent">新版本 v{avail.version}</Badge>}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-[var(--ink-secondary)]">
-              {info && <span>Windows build {info.osBuild} · 窗口材质 {info.effect}</span>}
-              {statusHint && (
-                <>
-                  {info && <span>·</span>}
-                  {statusHint}
-                </>
-              )}
-            </div>
+            {statusHint && (
+              <div className="mt-1 text-xs text-[var(--ink-secondary)]">{statusHint}</div>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -912,10 +881,7 @@ export default function SettingsPage({
         <div className="mx-auto max-w-[660px]">
           {section === "general" && (
             <div className="flex flex-col gap-4">
-              <SectionHeader
-                title="常规与外观"
-                desc="定制界面主题风格与 Windows 系统启动行为"
-              />
+              <SectionHeader title="常规与外观" />
               <ThemePicker value={settings?.theme ?? "system"} onChange={(t) => api.setTheme(t)} />
               <SettingRow
                 title="开机自动启动"
@@ -923,7 +889,7 @@ export default function SettingsPage({
                   autostartError ? (
                     <span className="text-[var(--danger)]">{autostartError}</span>
                   ) : (
-                    "登录 Windows 后静默驻留系统托盘并预热模型，不弹出主窗口"
+                    "开机后在后台自动运行"
                   )
                 }
               >
@@ -934,17 +900,14 @@ export default function SettingsPage({
 
           {section === "hotkeys" && (
             <div className="flex flex-col gap-3">
-              <SectionHeader
-                title="全局快捷键"
-                desc="点击右侧键帽框即可录制新组合，支持在任意桌面应用中全局呼出"
-              />
+              <SectionHeader title="全局快捷键" />
               <SettingRow
                 title="迷你翻译窗"
                 desc={
                   hk("mini")?.error ? (
                     <span className="text-[var(--warn)]">{hk("mini")?.error}</span>
                   ) : (
-                    "在任意位置快速呼出悬浮输入翻译条，再次按下即隐藏"
+                    "快速打开悬浮输入框"
                   )
                 }
               >
@@ -956,7 +919,7 @@ export default function SettingsPage({
                   hk("shot")?.error ? (
                     <span className="text-[var(--warn)]">{hk("shot")?.error}</span>
                   ) : (
-                    "冻结屏幕并框选区域，离线 OCR 识别后将译文原位覆盖"
+                    "框选屏幕区域直接翻译"
                   )
                 }
               >
@@ -968,7 +931,7 @@ export default function SettingsPage({
                   hk("selection")?.error ? (
                     <span className="text-[var(--warn)]">{hk("selection")?.error}</span>
                   ) : (
-                    "快速开启或暂停划词翻译，关闭时系统托盘图标变为灰色"
+                    "一键开启或暂停划词翻译"
                   )
                 }
               >

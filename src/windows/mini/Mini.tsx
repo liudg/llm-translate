@@ -18,17 +18,11 @@ import { useAutoHeight } from "../../lib/useAutoHeight";
 import { useStreamAutoScroll } from "../../lib/useStreamAutoScroll";
 import { BrandSeal, IconButton, Kbd } from "../../components/ui";
 import { CopyResultButton, DirCycleButton, TranslationBody } from "../../components/translation";
-import { useHistory, type ReadingScale } from "../../stores/history";
+import { useHistory } from "../../stores/history";
 import { startInferenceSync, useInference } from "../../stores/inference";
 
 const WIDTH = 640;
 const MAX_INPUT_PX = 132; // ~5 lines
-
-const RESULT_SCALE_CLASS: Record<ReadingScale, string> = {
-  sm: "text-[14px] leading-[1.68]",
-  md: "text-[15.5px] leading-[1.74]",
-  lg: "text-[17px] leading-[1.8]",
-};
 
 export default function Mini() {
   const win = getCurrentWindow();
@@ -36,8 +30,6 @@ export default function Mini() {
   const [choice, setChoice] = useState<DirChoice>("auto");
   const { state, run, stop, clear, drop } = useTranslator();
   const status = useInference((s) => s.status);
-  const fontScale = useHistory((s) => s.fontScale);
-  const fontFamily = useHistory((s) => s.fontFamily);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wasBusy = useRef(false);
@@ -182,7 +174,6 @@ export default function Mini() {
   });
 
   const showResult = Boolean(state.busy || state.result || state.error || state.stopped);
-  const readingFont = fontFamily === "serif" ? "var(--font-reading-serif)" : "var(--font-reading)";
 
   const statusDot =
     status.state === "ready"
@@ -269,8 +260,6 @@ export default function Mini() {
         <MiniResultSheet
           state={state}
           canRetry={Boolean(text.trim())}
-          scaleClass={RESULT_SCALE_CLASS[fontScale]}
-          readingFont={readingFont}
           onOpenInMain={openInMain}
           onStop={stop}
           onRetry={submit}
@@ -283,16 +272,12 @@ export default function Mini() {
 function MiniResultSheet({
   state,
   canRetry,
-  scaleClass,
-  readingFont,
   onOpenInMain,
   onStop,
   onRetry,
 }: {
   state: TranslatorState;
   canRetry: boolean;
-  scaleClass: string;
-  readingFont: string;
   onOpenInMain: () => void;
   onStop: () => void;
   onRetry: () => void;
@@ -307,8 +292,8 @@ function MiniResultSheet({
 
       <div
         ref={resultRef}
-        className={`selectable max-h-[320px] overflow-y-auto px-5 py-3.5 whitespace-pre-wrap text-[var(--ink)] ${scaleClass}`}
-        style={{ fontFamily: readingFont }}
+        className="selectable max-h-[320px] overflow-y-auto px-5 py-3.5 text-[15.5px] leading-[1.74] whitespace-pre-wrap text-[var(--ink)]"
+        style={{ fontFamily: "var(--font-reading)" }}
       >
         <TranslationBody state={state} />
       </div>

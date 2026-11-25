@@ -216,7 +216,7 @@ export default function Wizard() {
               本地离线翻译引擎部署
             </h1>
             <p className="mt-0.5 text-xs text-[var(--ink-secondary)]">
-              推理全程在本机运行，无需联网或云端 API，翻译内容不会离开你的电脑
+              离线运行，翻译内容仅保存在本地
             </p>
           </div>
         </div>
@@ -315,8 +315,8 @@ export default function Wizard() {
           />
         ) : step === "verify" ? (
           <Centered
-            title="校验模型完整性"
-            detail="正在计算 SHA-256 摘要，确认本地模型文件完整无损"
+            title="校验模型文件"
+            detail="正在检查文件完整性，请稍候…"
           >
             <div className="mb-2 text-2xl font-semibold text-[var(--ink)] tabular-nums">
               {Math.min(100, Math.round(verify * 100))}%
@@ -325,11 +325,11 @@ export default function Wizard() {
           </Centered>
         ) : step === "launch" || step === "selftest" ? (
           <Centered
-            title={step === "launch" ? "启动本地推理引擎" : "运行首次译文自检"}
+            title={step === "launch" ? "启动翻译引擎" : "测试翻译效果"}
             detail={
               step === "launch"
-                ? `正在以 ${backendName(fallback ? "cpu" : (plan?.backend ?? "cpu"))} 加载模型权重，首次加载可能需要数秒`
-                : `正在使用本地模型试译「${SELF_TEST_TEXT}」验证输出可用`
+                ? `正在通过 ${backendName(fallback ? "cpu" : (plan?.backend ?? "cpu"))} 加载模型，请稍候…`
+                : "正在进行首次翻译测试…"
             }
           >
             <Progress value={0} indeterminate />
@@ -423,7 +423,7 @@ function Welcome(props: {
   }
   if (!detect || !plan) {
     return (
-      <Centered title="正在检测本机硬件" detail="扫描处理器、可用内存、Vulkan 显卡与磁盘剩余空间">
+      <Centered title="正在检测硬件" detail="正在匹配适合你电脑的翻译模型…">
         <Progress value={0} indeterminate />
       </Centered>
     );
@@ -444,7 +444,7 @@ function Welcome(props: {
           icon={<Cpu className="size-4" />}
           label="处理器"
           value={hw.cpu.name}
-          sub={`${hw.cpu.physicalCores} 物理核心 · ${hw.cpu.logicalCores} 线程${hw.cpu.avx2 ? " · AVX2" : ""}`}
+          sub={`${hw.cpu.physicalCores} 核 ${hw.cpu.logicalCores} 线程`}
         />
         <SpecTile
           icon={<MemoryStick className="size-4" />}
@@ -454,16 +454,16 @@ function Welcome(props: {
         />
         <SpecTile
           icon={<MonitorCog className="size-4" />}
-          label="图形显卡（Vulkan）"
+          label="显卡"
           value={
-            hw.gpus.length > 0 ? hw.gpus[0].name : "未检测到可用 Vulkan 显卡"
+            hw.gpus.length > 0 ? hw.gpus[0].name : "未检测到可用显卡"
           }
           sub={
             hw.gpus.length > 0
               ? hw.gpus
                   .map((g) => (g.integrated ? "核显" : `可用显存 ${mbToGb(g.freeMb)}`))
                   .join(" · ")
-              : "将自动使用 CPU 推理"
+              : "将使用 CPU 运行"
           }
         />
         <SpecTile
@@ -675,7 +675,7 @@ function DownloadPanel(props: {
   return (
     <Centered
       title={`下载 ${model?.name ?? "模型"}`}
-      detail={paused ? "下载已暂停，进度已保留并支持随时断点续传" : "正在自动选取最快镜像源直连下载"}
+      detail={paused ? "下载已暂停，可随时继续" : "正在自动选择较快的下载源"}
     >
       <Card className="flex flex-col gap-3 p-5 text-left">
         <div className="flex items-baseline justify-between">
@@ -844,7 +844,7 @@ function Done({
       {/* Bilingual self-test card */}
       <Card className="w-full overflow-hidden text-left">
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-4 py-2 text-[11px] text-[var(--ink-muted)]">
-          <span>本地自检通过</span>
+          <span>试译结果</span>
           <span className="font-mono tabular-nums">{outcome.translateMs} ms</span>
         </div>
         <div className="grid grid-cols-2 divide-x divide-[var(--border-subtle)] text-sm">
@@ -878,7 +878,7 @@ function Done({
       <div className="mt-4 flex w-full items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-left">
         <div>
           <div className="text-xs font-medium text-[var(--ink)]">开机自动启动</div>
-          <div className="text-[11px] text-[var(--ink-muted)]">静默驻留系统托盘，随叫随译</div>
+          <div className="text-[11px] text-[var(--ink-muted)]">开机后在后台自动运行</div>
         </div>
         <Toggle
           checked={autostart ?? false}

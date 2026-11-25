@@ -15,7 +15,7 @@ export function statusView(status: InferenceStatus): [dot: string, text: string,
   switch (status.state) {
     case "ready": {
       const model = shortModelName(status.modelId);
-      const dev = status.backend === "vulkan" ? "Vulkan" : "CPU";
+      const dev = status.backend === "vulkan" ? "GPU" : "CPU";
       return [
         "bg-[var(--good)]",
         `就绪 · ${model ? `${model} · ` : ""}${backendName(status.backend)}`,

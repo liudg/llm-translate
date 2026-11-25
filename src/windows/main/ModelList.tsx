@@ -6,7 +6,6 @@ import {
   api,
   errorText,
   events,
-  SELF_TEST_TEXT,
   type DownloadError,
   type LaunchOutcome,
   type ModelView,
@@ -124,11 +123,11 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
         out.fallbackReason
           ? {
               tone: "warn",
-              text: `已切换到 ${m.name}，但 GPU 启动失败，已自动改用 CPU。原因：${out.fallbackReason}`,
+              text: `已切换到 ${m.name}，GPU 启动失败，已自动改用 CPU：${out.fallbackReason}`,
             }
           : {
               tone: "good",
-              text: `已切换到 ${m.name}（${backendName(out.backend)}，耗时 ${(out.loadMs / 1000).toFixed(1)} 秒）· 自检“${SELF_TEST_TEXT}” → “${out.sample}”`,
+              text: `已切换到 ${m.name}（${backendName(out.backend)}，耗时 ${(out.loadMs / 1000).toFixed(1)} 秒）`,
             },
       );
     } catch (e) {
@@ -223,7 +222,7 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
                 ) : switching === m.id ? (
                   <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-text)]">
                     <Spinner className="size-3.5" />
-                    正在加载并自检…
+                    正在加载…
                   </span>
                 ) : confirmDelete === m.id ? (
                   <div className="flex items-center gap-1.5">

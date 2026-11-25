@@ -1,6 +1,11 @@
 ﻿; NSIS hooks for LLM Translate (DESIGN 5.7 / 6).
 ; Saved as UTF-8 with BOM so NSIS Unicode compiles Chinese strings cleanly.
 
+!macro NSIS_HOOK_POSTINSTALL
+  ; Notify Windows Shell so upgraded shortcuts and exe icons refresh promptly.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
+!macroend
+
 !macro NSIS_HOOK_POSTUNINSTALL
   ; Preserve autostart, settings and downloaded models across upgrade reinstalls.
   ${If} $UpdateMode <> 1

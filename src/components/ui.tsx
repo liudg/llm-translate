@@ -478,15 +478,15 @@ export function Toggle({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange?.(!checked)}
-      className={`relative h-[22px] w-10 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`relative inline-flex h-[22px] w-10 shrink-0 cursor-pointer items-center rounded-full border p-[2px] transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
         checked
           ? "border-transparent bg-[var(--accent)]"
           : "border-[var(--border-strong)] bg-[var(--bg-recessed)]"
       }`}
     >
       <span
-        className={`absolute top-1/2 size-4 -translate-y-1/2 rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.22)] transition-transform duration-200 ease-out ${
-          checked ? "translate-x-[20px]" : "translate-x-[2px]"
+        className={`block size-4 rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.22)] transition-transform duration-200 ease-out ${
+          checked ? "translate-x-[18px]" : "translate-x-0"
         }`}
       />
     </button>

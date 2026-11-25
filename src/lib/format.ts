@@ -26,4 +26,4 @@ export function mbToGb(mb: number): string {
   return `${(mb / 1024).toFixed(1)} GB`;
 }
 
-export const backendName = (b: "vulkan" | "cpu") => (b === "vulkan" ? "GPU（Vulkan）" : "CPU");
+export const backendName = (b: "vulkan" | "cpu") => (b === "vulkan" ? "GPU" : "CPU");

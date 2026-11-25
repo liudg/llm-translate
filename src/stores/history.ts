@@ -1,9 +1,7 @@
-// Persistent translation history & reading preferences synchronized across windows.
+// Persistent translation history synchronized across windows.
 import { create } from "zustand";
 import type { Direction } from "../lib/api";
 
-export type ReadingScale = "sm" | "md" | "lg";
-export type ReadingFont = "sans" | "serif";
 export type HistoryOrigin = "main" | "mini" | "popup";
 
 export interface HistoryItem {
@@ -18,13 +16,7 @@ export interface HistoryItem {
 }
 
 const HISTORY_KEY = "llm-translate.history.v1";
-const PREFS_KEY = "llm-translate.prefs.v1";
 const MAX_ITEMS = 60;
-
-interface ReadingPrefs {
-  fontScale: ReadingScale;
-  fontFamily: ReadingFont;
-}
 
 function loadHistory(): HistoryItem[] {
   try {
@@ -45,53 +37,15 @@ function saveHistory(items: HistoryItem[]) {
   }
 }
 
-function loadPrefs(): ReadingPrefs {
-  let fontScale: ReadingScale = "md";
-  let fontFamily: ReadingFont = "sans";
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<ReadingPrefs>;
-      if (parsed.fontScale === "sm" || parsed.fontScale === "md" || parsed.fontScale === "lg") {
-        fontScale = parsed.fontScale;
-      }
-      if (parsed.fontFamily === "sans" || parsed.fontFamily === "serif") {
-        fontFamily = parsed.fontFamily;
-      }
-    }
-  } catch {
-    // Ignore parse errors.
-  }
-  return { fontScale, fontFamily };
-}
-
-function savePrefs(patch: Partial<ReadingPrefs>): ReadingPrefs {
-  const next = { ...loadPrefs(), ...patch };
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(next));
-  } catch {
-    // Ignore storage errors.
-  }
-  return next;
-}
-
 interface HistoryStore {
   items: HistoryItem[];
-  fontScale: ReadingScale;
-  fontFamily: ReadingFont;
   record: (entry: Omit<HistoryItem, "id" | "timestamp">) => void;
   remove: (id: string) => void;
   clear: () => void;
-  setFontScale: (scale: ReadingScale) => void;
-  setFontFamily: (f: ReadingFont) => void;
 }
-
-const initialPrefs = loadPrefs();
 
 export const useHistory = create<HistoryStore>((set) => ({
   items: loadHistory(),
-  fontScale: initialPrefs.fontScale,
-  fontFamily: initialPrefs.fontFamily,
   record: (entry) => {
     const source = entry.source.trim();
     const result = entry.result.trim();
@@ -122,25 +76,13 @@ export const useHistory = create<HistoryStore>((set) => ({
     saveHistory([]);
     set({ items: [] });
   },
-  setFontScale: (fontScale) => {
-    const next = savePrefs({ fontScale });
-    set({ fontScale: next.fontScale, fontFamily: next.fontFamily });
-  },
-  setFontFamily: (fontFamily) => {
-    const next = savePrefs({ fontFamily });
-    set({ fontScale: next.fontScale, fontFamily: next.fontFamily });
-  },
 }));
 
-// Keep all open windows (Main, Mini, Popup) in sync when another window writes history or prefs.
+// Keep all open windows (Main, Mini, Popup) in sync when another window writes history.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
     if (e.key === HISTORY_KEY || e.key === null) {
       useHistory.setState({ items: loadHistory() });
-    }
-    if (e.key === PREFS_KEY || e.key === null) {
-      const prefs = loadPrefs();
-      useHistory.setState({ fontScale: prefs.fontScale, fontFamily: prefs.fontFamily });
     }
   });
 }

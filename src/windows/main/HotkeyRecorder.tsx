@@ -177,7 +177,7 @@ export function HotkeyRecorder({
         return;
       }
       if (!mods.some((m) => m !== "Shift")) {
-        setError("快捷键需要包含 Ctrl 或 Alt（推荐 Alt / Ctrl+Alt / Ctrl+Shift）");
+        setError("快捷键需要包含 Ctrl 或 Alt");
         return;
       }
       void save([...mods, key].join("+"));
@@ -261,7 +261,7 @@ export function HotkeyRecorder({
 
       {recording && (
         <span className="text-[11px] text-[var(--ink-muted)]">
-          推荐 Alt / Ctrl+Alt / Ctrl+Shift 组合 · Esc 取消 · Backspace 解除绑定
+          Esc 取消 · Backspace 清除
         </span>
       )}
       {error && <span className="max-w-72 text-right text-xs text-[var(--danger)]">{error}</span>}

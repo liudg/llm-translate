@@ -20,14 +20,8 @@ import { useCopy } from "../../lib/useCopy";
 import { useStreamAutoScroll } from "../../lib/useStreamAutoScroll";
 import { BrandSeal, Button, IconButton } from "../../components/ui";
 import { CopyResultButton, DirCycleButton, TranslationBody } from "../../components/translation";
-import { useHistory, type ReadingScale } from "../../stores/history";
+import { useHistory } from "../../stores/history";
 import { startInferenceSync } from "../../stores/inference";
-
-const RESULT_SCALE_CLASS: Record<ReadingScale, string> = {
-  sm: "text-[13.5px] leading-[1.66]",
-  md: "text-[15px] leading-[1.72]",
-  lg: "text-[16.5px] leading-[1.78]",
-};
 
 export default function Popup() {
   const [payload, setPayload] = useState<SelectionPayload | null>(null);
@@ -35,8 +29,6 @@ export default function Popup() {
   const [pinned, setPinned] = useState(false);
   const [choice, setChoice] = useState<DirChoice>("auto");
   const { state, run, stop, clear, drop } = useTranslator();
-  const fontScale = useHistory((s) => s.fontScale);
-  const fontFamily = useHistory((s) => s.fontFamily);
   const sourceCopy = useCopy();
   const rootRef = useRef<HTMLDivElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -168,7 +160,6 @@ export default function Popup() {
   };
 
   const source = payload?.text ?? "";
-  const readingFont = fontFamily === "serif" ? "var(--font-reading-serif)" : "var(--font-reading)";
 
   return (
     <div ref={rootRef} className="flyout-frame flex flex-col text-sm">
@@ -245,8 +236,8 @@ export default function Popup() {
       {/* Translation reading body */}
       <div
         ref={resultRef}
-        className={`selectable max-h-[300px] min-h-12 overflow-y-auto bg-[var(--bg-flyout-result)] px-4 py-3.5 whitespace-pre-wrap text-[var(--ink)] ${RESULT_SCALE_CLASS[fontScale]}`}
-        style={{ fontFamily: readingFont }}
+        className="selectable max-h-[300px] min-h-12 overflow-y-auto bg-[var(--bg-flyout-result)] px-4 py-3.5 text-[15px] leading-[1.72] whitespace-pre-wrap text-[var(--ink)]"
+        style={{ fontFamily: "var(--font-reading)" }}
       >
         {payload?.error && (
           <div className="flex flex-col gap-3 text-xs leading-relaxed">

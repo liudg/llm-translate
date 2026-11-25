@@ -1,6 +1,6 @@
 // Translation Studio (DESIGN 5.4): unified editorial dual-sheet separated by
-// the Living Ink Seam, with swap/back-translate, font-scale & serif typography,
-// quick paste, bilingual copy, smart auto-scroll, in-app history drawer and full keyboard ergonomics.
+// the Living Ink Seam, with swap/back-translate, quick paste, bilingual copy,
+// smart auto-scroll, in-app history drawer and full keyboard ergonomics.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeftRight,
@@ -18,7 +18,7 @@ import { type HotkeyInfo, type OpenTranslatePayload } from "../../lib/api";
 import { useCopy } from "../../lib/useCopy";
 import { useStreamAutoScroll } from "../../lib/useStreamAutoScroll";
 import { DIR_LABEL, footerText, isImeComposing, useTranslator, type DirChoice } from "../../lib/useTranslator";
-import { useHistory, type HistoryItem, type ReadingFont, type ReadingScale } from "../../stores/history";
+import { useHistory, type HistoryItem } from "../../stores/history";
 import { useSettings } from "../../stores/settings";
 import { Button, IconButton, Kbd, Segmented } from "../../components/ui";
 import { TranslationBody } from "../../components/translation";
@@ -26,12 +26,7 @@ import { HistoryDrawer } from "./HistoryDrawer";
 
 const DEBOUNCE_MS = 500;
 const MAX_CHARS = 20000;
-
-const FONT_SCALE_CLASS: Record<ReadingScale, string> = {
-  sm: "text-[14.5px] leading-[1.72]",
-  md: "text-[15.5px] leading-[1.78]",
-  lg: "text-[17.5px] leading-[1.84]",
-};
+const READING_TEXT_CLASS = "text-[15.5px] leading-[1.78]";
 
 export interface IncomingTranslate {
   payload: OpenTranslatePayload;
@@ -58,10 +53,6 @@ export default function TranslatePage({
   const settings = useSettings((s) => s.settings);
   const historyItems = useHistory((s) => s.items);
   const recordHistory = useHistory((s) => s.record);
-  const fontScale = useHistory((s) => s.fontScale);
-  const setFontScale = useHistory((s) => s.setFontScale);
-  const fontFamily = useHistory((s) => s.fontFamily);
-  const setFontFamily = useHistory((s) => s.setFontFamily);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -308,9 +299,6 @@ export default function TranslatePage({
               ? "中文"
               : "译文";
 
-  const readingClass = FONT_SCALE_CLASS[fontScale];
-  const readingFontFamily =
-    fontFamily === "serif" ? "var(--font-reading-serif)" : "var(--font-reading)";
   const canSwap = Boolean(state.result.trim()) && !state.busy;
   const canCopyBilingual = Boolean(state.result.trim()) && Boolean((state.source || source).trim());
 
@@ -329,33 +317,6 @@ export default function TranslatePage({
         />
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {/* Editorial typography toggle: Sans vs Dictionary Serif */}
-          <Segmented<ReadingFont>
-            size="sm"
-            value={fontFamily}
-            onChange={setFontFamily}
-            options={[
-              { value: "sans", label: "无衬线", title: "现代无衬线排印（Segoe UI / 微软雅黑）" },
-              {
-                value: "serif",
-                label: <span style={{ fontFamily: "var(--font-reading-serif)" }}>衬线</span>,
-                title: "辞典衬线排印（Sitka / Georgia / 华文中宋）",
-              },
-            ]}
-          />
-
-          {/* Reading font size control */}
-          <Segmented<ReadingScale>
-            size="sm"
-            value={fontScale}
-            onChange={setFontScale}
-            options={[
-              { value: "sm", label: "小字", title: "紧凑阅读字号" },
-              { value: "md", label: "标准", title: "标准阅读字号" },
-              { value: "lg", label: "大字", title: "舒适大号阅读" },
-            ]}
-          />
-
           {/* History drawer button */}
           <Button
             variant="secondary"
@@ -435,10 +396,10 @@ export default function TranslatePage({
                   void pasteClipboard();
                 }
               }}
-              placeholder="输入或粘贴中文 / 英文，停顿片刻自动翻译…"
+              placeholder="输入或粘贴要翻译的内容…"
               spellCheck={false}
-              className={`min-h-0 flex-1 resize-none bg-transparent px-5 py-4 text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] ${readingClass}`}
-              style={{ fontFamily: readingFontFamily }}
+              className={`min-h-0 flex-1 resize-none bg-transparent px-5 py-4 text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] ${READING_TEXT_CLASS}`}
+              style={{ fontFamily: "var(--font-reading)" }}
             />
 
             {/* Serene empty-state shortcuts whisper */}
@@ -552,10 +513,10 @@ export default function TranslatePage({
           {/* Reading canvas */}
           <div
             ref={resultRef}
-            className={`selectable min-h-0 flex-1 overflow-y-auto px-5 py-4 whitespace-pre-wrap text-[var(--ink)] ${readingClass}`}
-            style={{ fontFamily: readingFontFamily }}
+            className={`selectable min-h-0 flex-1 overflow-y-auto px-5 py-4 whitespace-pre-wrap text-[var(--ink)] ${READING_TEXT_CLASS}`}
+            style={{ fontFamily: "var(--font-reading)" }}
           >
-            <TranslationBody state={state} placeholder="译文将在此处实时流式呈现" />
+            <TranslationBody state={state} placeholder="译文将显示在这里" />
           </div>
 
           {/* Translation micro-footer */}
