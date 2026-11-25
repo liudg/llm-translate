@@ -48,10 +48,16 @@ impl Group {
         self.lines.iter().map(Line::height).sum::<f32>() / self.lines.len() as f32
     }
 
-    fn accepts(&self, l: &Line) -> bool {
+    /// `row`: the other OCR lines on `l`'s row.
+    fn accepts(&self, l: &Line, row: &[&Line]) -> bool {
         let last = self.lines.last().unwrap();
         let h = self.avg_height();
-        let (_, _, right, _) = self.bounds();
+        let (left, _, right, _) = self.bounds();
+        // More text beside `l` within this paragraph's width: the row is laid
+        // out in items (options, menus, table cells), not wrapped prose.
+        if row.iter().any(|o| o.x0 < right && o.x1 > left) {
+            return false;
+        }
         let gap = l.y0 - last.y1;
         let ratio = l.height() / h;
         let last_width = last.x1 - last.x0;
@@ -97,16 +103,32 @@ fn join_line(out: &mut String, next: &str) {
 /// Group lines into paragraphs in reading order (top to bottom, then left to right).
 pub fn paragraphs(mut lines: Vec<Line>, bgra: &[u8], width: u32, height: u32) -> Vec<Paragraph> {
     lines.sort_by(|a, b| a.y0.total_cmp(&b.y0).then(a.x0.total_cmp(&b.x0)));
+    // Lines beside each line: horizontally apart, vertically overlapping by
+    // at least half the shorter one.
+    let rows: Vec<Vec<usize>> = (0..lines.len())
+        .map(|i| {
+            let a = &lines[i];
+            (0..lines.len())
+                .filter(|&j| {
+                    let b = &lines[j];
+                    j != i
+                        && (a.x1 <= b.x0 || b.x1 <= a.x0)
+                        && a.y1.min(b.y1) - a.y0.max(b.y0) >= 0.5 * a.height().min(b.height())
+                })
+                .collect()
+        })
+        .collect();
     let mut groups: Vec<Group> = Vec::new();
-    'lines: for l in lines {
+    'lines: for (i, l) in lines.iter().enumerate() {
+        let row: Vec<&Line> = rows[i].iter().map(|&j| &lines[j]).collect();
         // Only open groups whose last line ends near this line's top qualify.
         for g in groups.iter_mut().rev() {
-            if g.accepts(&l) {
-                g.lines.push(l);
+            if g.accepts(l, &row) {
+                g.lines.push(l.clone());
                 continue 'lines;
             }
         }
-        groups.push(Group { lines: vec![l] });
+        groups.push(Group { lines: vec![l.clone()] });
     }
     let img = Image { px: bgra, w: width as i32, h: height as i32 };
     let mut out: Vec<Paragraph> = groups
@@ -329,6 +351,38 @@ mod tests {
         assert_eq!(p[0].lines, 2);
         assert_eq!(p[1].text, "File");
         assert_eq!(p[2].text, "Edit");
+    }
+
+    #[test]
+    fn item_row_under_a_long_line_stays_apart() {
+        // Real OCR boxes: a question, then options spread across one row.
+        let lines = vec![
+            line(64.0, 15.0, 743.0, 45.0, "How is Claude doing this session? (optional)"),
+            line(67.0, 54.0, 164.0, 82.0, "1: Bad"),
+            line(220.0, 54.0, 334.0, 82.0, "2: Fine"),
+            line(374.0, 55.0, 488.0, 81.0, "3: Good"),
+            line(527.0, 54.0, 684.0, 82.0, "0: Dismiss"),
+        ];
+        let p = paragraphs(lines, &white(802, 110), 802, 110);
+        let texts: Vec<&str> = p.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts, ["How is Claude doing this session? (optional)", "1: Bad", "2: Fine", "3: Good", "0: Dismiss"]);
+        assert_eq!(p[0].lines, 1);
+    }
+
+    #[test]
+    fn two_column_prose_still_merges() {
+        let lines = vec![
+            line(10.0, 10.0, 400.0, 30.0, "left column text that is long enough"),
+            line(500.0, 10.0, 900.0, 30.0, "right column text that is long enough"),
+            line(10.0, 34.0, 200.0, 54.0, "left ends here."),
+            line(500.0, 34.0, 700.0, 54.0, "right ends here."),
+        ];
+        let p = paragraphs(lines, &white(1000, 100), 1000, 100);
+        let texts: Vec<&str> = p.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            ["left column text that is long enough left ends here.", "right column text that is long enough right ends here."]
+        );
     }
 
     #[test]
