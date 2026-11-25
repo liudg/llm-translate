@@ -13,10 +13,12 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel, sync_channel};
 
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::System::Threading::{
+    GetCurrentProcessId, GetCurrentThreadId, GetProcessIdOfThread, OpenThread, THREAD_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
@@ -30,6 +32,8 @@ const DIM: u32 = 140; // of 256
 const OUTLINE: COLORREF = COLORREF(0x00FF_C24C);
 const LABEL_BG: COLORREF = COLORREF(0x0020_2020);
 const HINT: &str = "拖动鼠标框选要翻译的区域　Esc 取消";
+/// Posted to take the foreground back from another window of this app.
+const WM_RECLAIM: u32 = WM_APP + 1;
 
 /// A finished selection: frame index and rectangle relative to that frame.
 #[derive(Debug, Clone, Copy)]
@@ -309,6 +313,19 @@ fn outline(dc: HDC, r: RECT, t: i32) {
     }
 }
 
+/// Whether thread `tid` belongs to this process.
+fn own_thread(tid: u32) -> bool {
+    if tid == 0 {
+        return false;
+    }
+    unsafe {
+        let Ok(h) = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, false, tid) else { return false };
+        let pid = GetProcessIdOfThread(h);
+        let _ = CloseHandle(h);
+        pid != 0 && pid == GetCurrentProcessId()
+    }
+}
+
 fn point(lp: LPARAM) -> POINT {
     POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 }
 }
@@ -396,8 +413,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         })
         .is_some(),
         WM_KEYDOWN if wp.0 == VK_ESCAPE.0 as usize => with_state(|s| s.finish(None)).is_some(),
-        // Switched to another app (e.g. Alt+Tab): give up.
-        WM_ACTIVATEAPP if wp.0 == 0 => with_state(|s| s.finish(None)).is_some(),
+        // Switched to another app (e.g. Alt+Tab): give up. One of our own
+        // windows taking it (the result window's first WebView2 creation,
+        // which runs while the overlay is up) is not the user leaving: take
+        // the foreground back so Esc keeps working. lParam: the thread being
+        // activated.
+        WM_ACTIVATEAPP if wp.0 == 0 => {
+            if own_thread(lp.0 as u32) {
+                unsafe {
+                    let _ = PostMessageW(Some(hwnd), WM_RECLAIM, WPARAM(0), LPARAM(0));
+                }
+                true
+            } else {
+                with_state(|s| s.finish(None)).is_some()
+            }
+        }
+        // Not after a selection: the result window then rightly takes over.
+        WM_RECLAIM => with_state(|s| {
+            if !s.done && !crate::selection::input::force_foreground(hwnd) {
+                tracing::warn!("screenshot overlay could not take the foreground back");
+            }
+        })
+        .is_some(),
         _ => false,
     };
     if handled { LRESULT(0) } else { unsafe { DefWindowProcW(hwnd, msg, wp, lp) } }
