@@ -1,25 +1,38 @@
-// Model management (DESIGN 5.8): every model in models.json with its download
-// state. Download (pause / resume / cancel), switch (launch + self-test with the
-// saved backend, previous model restored on failure) and delete.
+// Model management (DESIGN 5.8): editorial tier cards with live download progress,
+// resume/cancel, self-tested model switch and safe delete confirmation.
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, Pause, Play, Trash2, X } from "lucide-react";
-import { api, errorText, events, SELF_TEST_TEXT, type DownloadError, type LaunchOutcome, type ModelView } from "../../lib/api";
+import { AlertTriangle, CheckCircle2, Download, HardDrive, Pause, Play, Sparkles, Trash2, X } from "lucide-react";
+import {
+  api,
+  errorText,
+  events,
+  SELF_TEST_TEXT,
+  type DownloadError,
+  type LaunchOutcome,
+  type ModelView,
+} from "../../lib/api";
 import { backendName, gb, speed } from "../../lib/format";
 import { Badge, Button, Progress, Spinner } from "../../components/ui";
 import { StatusChip } from "../../components/status";
 import { useSettings } from "../../stores/settings";
 
-/** Live state of a download started on this page. */
 interface Transfer {
   done: number;
   total: number;
-  /** Text under the bar: speed / source, retry notice, verifying. */
   note: string;
   verifying: boolean;
   pausing: boolean;
 }
 
 type Message = { tone: "good" | "warn" | "error"; text: string };
+
+function splitTierName(name: string): { tier: string | null; title: string } {
+  const parts = name.split("·").map((s) => s.trim());
+  if (parts.length >= 2) {
+    return { tier: parts[0], title: parts.slice(1).join(" · ") };
+  }
+  return { tier: null, title: name };
+}
 
 export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
   const settings = useSettings((s) => s.settings);
@@ -35,7 +48,6 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
   }, [dir]);
 
   useEffect(refresh, [refresh, settings?.modelId]);
-  // Back from the wizard: a paused download now shows 继续下载 here.
   useEffect(() => {
     const un = events.modelsChanged(refresh);
     return () => {
@@ -48,13 +60,20 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
     const un = events.download((e) => {
       setTransfers((all) => {
         const t = all[e.modelId];
-        if (!t) return all; // started elsewhere (wizard)
+        if (!t) return all;
         let next: Transfer = t;
         if (e.phase === "probe") next = { ...t, note: "正在测试下载源…" };
         if (e.phase === "download")
-          next = { ...t, done: e.done, total: e.total, verifying: false, note: `${speed(e.speedBps)} · ${e.source}` };
+          next = {
+            ...t,
+            done: e.done,
+            total: e.total,
+            verifying: false,
+            note: `${speed(e.speedBps)} · ${e.source}`,
+          };
         if (e.phase === "retry") next = { ...t, note: `${e.message}，${e.waitSecs} 秒后重试` };
-        if (e.phase === "verify") next = { ...t, done: e.done, total: e.total, verifying: true, note: "正在校验文件…" };
+        if (e.phase === "verify")
+          next = { ...t, done: e.done, total: e.total, verifying: true, note: "正在校验文件完整性…" };
         return { ...all, [e.modelId]: next };
       });
     });
@@ -69,11 +88,17 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
     setMessage(null);
     setTransfers((all) => ({
       ...all,
-      [m.id]: { done: m.downloadedBytes, total: m.size, note: "正在测试下载源…", verifying: false, pausing: false },
+      [m.id]: {
+        done: m.downloadedBytes,
+        total: m.size,
+        note: "正在测试下载源…",
+        verifying: false,
+        pausing: false,
+      },
     }));
     try {
       await api.download(m.id, dir);
-      setMessage({ tone: "good", text: `${m.name} 下载完成，可以切换使用` });
+      setMessage({ tone: "good", text: `${m.name} 下载完成，现在可以切换使用` });
     } catch (e) {
       const err = e as DownloadError;
       if (err?.kind !== "paused" && err?.kind !== "cancelled") {
@@ -99,11 +124,11 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
         out.fallbackReason
           ? {
               tone: "warn",
-              text: `已切换到 ${m.name}，但 GPU 启动失败，已改用 CPU（速度较慢）。原因：${out.fallbackReason}`,
+              text: `已切换到 ${m.name}，但 GPU 启动失败，已自动改用 CPU。原因：${out.fallbackReason}`,
             }
           : {
               tone: "good",
-              text: `已切换到 ${m.name} · ${backendName(out.backend)} · 加载 ${(out.loadMs / 1000).toFixed(1)} 秒；自检“${SELF_TEST_TEXT}” → “${out.sample}”`,
+              text: `已切换到 ${m.name}（${backendName(out.backend)}，耗时 ${(out.loadMs / 1000).toFixed(1)} 秒）· 自检“${SELF_TEST_TEXT}” → “${out.sample}”`,
             },
       );
     } catch (e) {
@@ -128,84 +153,113 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
   const locked = switching !== null;
 
   return (
-    <div className="flex flex-col divide-y divide-[var(--stroke)] rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)]">
+    <div className="flex flex-col gap-2.5">
       {models.map((m) => {
         const current = settings.deployed && settings.modelId === m.id;
         const t = transfers[m.id];
         const partial = !m.installed && m.downloadedBytes > 0;
         const pct = m.size ? Math.floor((m.downloadedBytes / m.size) * 100) : 0;
+        const livePct = t && t.total ? Math.min(100, Math.round((t.done / t.total) * 100)) : 0;
+        const { tier, title } = splitTierName(m.name);
+
         return (
-          <div key={m.id} className="flex flex-col gap-2 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div
+            key={m.id}
+            className={`flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
+              current
+                ? "border-[var(--accent)]/45 bg-[var(--bg-surface)] shadow-[var(--shadow-card)]"
+                : "border-[var(--border)] bg-[var(--bg-surface)] shadow-[var(--shadow-card)]"
+            }`}
+          >
+            <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-sm">
-                  {m.name}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-[var(--ink)]">{title}</span>
+                  {tier && <Badge tone="neutral">{tier}</Badge>}
                   {current ? (
-                    <Badge tone="accent">使用中</Badge>
+                    <Badge tone="accent">
+                      <Sparkles className="size-3" />
+                      当前使用
+                    </Badge>
                   ) : m.installed ? (
-                    <Badge tone="good">已下载</Badge>
+                    <Badge tone="good">已就绪</Badge>
                   ) : partial && !t ? (
                     <Badge tone="warn">已下载 {pct}%</Badge>
                   ) : null}
                 </div>
-                <div className="mt-0.5 text-xs opacity-65">
-                  {gb(m.size)} · 建议显存 ≥ {m.recommendVramGB} GB · 内存 ≥ {m.minRamGB} GB
+
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ink-secondary)] tabular-nums">
+                  <span className="inline-flex items-center gap-1">
+                    <HardDrive className="size-3 text-[var(--ink-muted)]" />
+                    {gb(m.size)}
+                  </span>
+                  <span>建议显存 ≥ {m.recommendVramGB} GB</span>
+                  <span>内存 ≥ {m.minRamGB} GB</span>
                 </div>
-                {current && <StatusChip className="mt-1" />}
+
+                {current && <StatusChip className="mt-2" />}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+
+              <div className="flex shrink-0 items-center gap-1.5">
                 {t ? (
                   <>
                     <Button
-                      icon={<Pause className="size-4" />}
+                      size="sm"
+                      icon={<Pause className="size-3.5" />}
                       disabled={t.pausing || t.verifying}
                       onClick={() => pause(m.id)}
                     >
                       暂停
                     </Button>
-                    <Button variant="subtle" icon={<X className="size-4" />} onClick={() => api.downloadControl(m.id, "cancel")}>
+                    <Button
+                      size="sm"
+                      variant="subtle"
+                      icon={<X className="size-3.5" />}
+                      onClick={() => api.downloadControl(m.id, "cancel")}
+                    >
                       取消
                     </Button>
                   </>
                 ) : switching === m.id ? (
-                  <span className="flex items-center gap-2 text-xs opacity-75">
-                    <Spinner />
+                  <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-text)]">
+                    <Spinner className="size-3.5" />
                     正在加载并自检…
                   </span>
                 ) : confirmDelete === m.id ? (
-                  <>
-                    <span className="text-xs opacity-75">删除后需重新下载</span>
-                    <Button
-                      className="bg-red-600 text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600"
-                      onClick={() => remove(m)}
-                    >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-[var(--ink-secondary)]">删除后需重新下载</span>
+                    <Button size="sm" variant="danger" onClick={() => remove(m)}>
                       确认删除
                     </Button>
-                    <Button variant="subtle" onClick={() => setConfirmDelete(null)}>
+                    <Button size="sm" variant="subtle" onClick={() => setConfirmDelete(null)}>
                       取消
                     </Button>
-                  </>
+                  </div>
                 ) : current ? null : (
                   <>
                     {m.installed ? (
-                      <Button variant="primary" disabled={locked} onClick={() => switchTo(m)}>
-                        使用
+                      <Button size="sm" variant="primary" disabled={locked} onClick={() => switchTo(m)}>
+                        切换使用
                       </Button>
                     ) : (
                       <Button
-                        icon={partial ? <Play className="size-4" /> : <Download className="size-4" />}
+                        size="sm"
+                        variant="secondary"
+                        icon={partial ? <Play className="size-3.5" /> : <Download className="size-3.5" />}
                         disabled={locked}
                         onClick={() => download(m)}
                       >
-                        {partial ? "继续下载" : "下载"}
+                        {partial ? "继续下载" : "下载模型"}
                       </Button>
                     )}
                     {(m.installed || partial) && (
                       <Button
+                        size="sm"
                         variant="subtle"
-                        icon={<Trash2 className="size-4" />}
+                        icon={<Trash2 className="size-3.5" />}
                         disabled={locked}
                         onClick={() => setConfirmDelete(m.id)}
+                        title="删除模型文件"
                       >
                         删除
                       </Button>
@@ -214,38 +268,46 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
                 )}
               </div>
             </div>
+
             {t && (
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-3 py-2.5">
+                <div className="flex items-center justify-between text-xs tabular-nums">
+                  <span className="font-medium text-[var(--ink)]">{livePct}%</span>
+                  <span className="text-[var(--ink-secondary)]">{t.pausing ? "正在暂停…" : t.note}</span>
+                </div>
                 <Progress value={t.total ? t.done / t.total : 0} />
-                <div className="flex justify-between text-xs opacity-65">
-                  <span>
-                    {gb(t.done)} / {gb(t.total)}
-                  </span>
-                  <span>{t.pausing ? "正在暂停…" : t.note}</span>
+                <div className="text-[11px] text-[var(--ink-muted)] tabular-nums">
+                  {gb(t.done)} / {gb(t.total)}
                 </div>
               </div>
             )}
           </div>
         );
       })}
+
       {message && (
         <div
-          className={`flex items-start gap-2 px-4 py-2.5 text-xs ${
+          className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed ${
             message.tone === "good"
-              ? "text-green-700 dark:text-green-400"
+              ? "border-[var(--good)]/25 bg-[var(--good-soft)] text-[var(--good)]"
               : message.tone === "warn"
-                ? "text-amber-700 dark:text-amber-400"
-                : "text-red-600 dark:text-red-400"
+                ? "border-[var(--warn)]/25 bg-[var(--warn-soft)] text-[var(--warn)]"
+                : "border-[var(--danger)]/25 bg-[var(--danger-soft)] text-[var(--danger)]"
           }`}
         >
           {message.tone === "good" ? (
-            <CheckCircle2 className="mt-px size-4 shrink-0" />
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
           ) : (
-            <AlertTriangle className="mt-px size-4 shrink-0" />
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           )}
           <span className="selectable flex-1 break-all whitespace-pre-wrap">{message.text}</span>
-          <button onClick={() => setMessage(null)} className="opacity-60 hover:opacity-100" title="关闭">
-            <X className="size-4" />
+          <button
+            type="button"
+            onClick={() => setMessage(null)}
+            className="cursor-pointer opacity-70 hover:opacity-100"
+            title="关闭"
+          >
+            <X className="size-3.5" />
           </button>
         </div>
       )}

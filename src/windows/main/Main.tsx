@@ -1,54 +1,42 @@
-// Main window (DESIGN 5.4 / 5.8): compact navigation rail + Translate / Settings pages.
-import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Download, Languages, Settings as SettingsIcon, X } from "lucide-react";
+// Main window: unified frameless editorial title bar + Translate Studio & Settings.
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Moon,
+  PanelTop,
+  ScanText,
+  Sun,
+  X,
+} from "lucide-react";
 import { api, events, type HotkeyInfo } from "../../lib/api";
-import { Button, Progress, Spinner } from "../../components/ui";
+import { useResolvedTheme } from "../../lib/theme";
+import { BrandSeal, Button, Progress, Segmented, Spinner } from "../../components/ui";
+import { TitleBar } from "../../components/TitleBar";
+import { StatusPill } from "../../components/status";
 import { startInferenceSync, useInference } from "../../stores/inference";
 import { useSettings } from "../../stores/settings";
 import { downloadProgress, startUpdaterSync, useUpdater } from "../../stores/updater";
-import TranslatePage from "./TranslatePage";
-import SettingsPage from "./SettingsPage";
+import TranslatePage, { type IncomingTranslate } from "./TranslatePage";
+import SettingsPage, { type SettingsSection } from "./SettingsPage";
 
 type Page = "translate" | "settings";
 
-function NavItem({
-  active,
-  icon,
-  label,
-  dot = false,
-  onClick,
-}: {
-  active: boolean;
-  icon: ReactNode;
-  label: string;
-  dot?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative flex w-14 flex-col items-center gap-0.5 rounded-md py-2 text-[11px] transition-colors ${
-        active ? "bg-black/[0.05] dark:bg-white/[0.07]" : "opacity-75 hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
-      }`}
-    >
-      {active && <span className="absolute top-1/2 left-0 h-4 w-[3px] -translate-y-1/2 rounded-full bg-[var(--accent)]" />}
-      <span className="relative">
-        {icon}
-        {dot && <span className="absolute -top-0.5 -right-1 size-2 rounded-full bg-[var(--accent)]" />}
-      </span>
-      {label}
-    </button>
-  );
-}
-
 function Banner({ children, onClose }: { children: ReactNode; onClose?: () => void }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-      <AlertTriangle className="mt-px size-4 shrink-0" />
-      <span className="flex-1">{children}</span>
+    <div className="flex items-start gap-2.5 rounded-lg border border-[var(--warn)]/25 bg-[var(--warn-soft)] px-3 py-2 text-xs text-[var(--warn)]">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+      <span className="flex-1 leading-relaxed">{children}</span>
       {onClose && (
-        <button onClick={onClose} className="opacity-60 hover:opacity-100" title="关闭">
-          <X className="size-4" />
+        <button
+          type="button"
+          onClick={onClose}
+          className="cursor-pointer opacity-65 hover:opacity-100"
+          title="关闭"
+        >
+          <X className="size-3.5" />
         </button>
       )}
     </div>
@@ -73,36 +61,38 @@ function UpdateBanner() {
 
   return (
     <div
-      className={`flex flex-col gap-2 rounded-md border px-3 py-2 text-xs ${
+      className={`flex flex-col gap-2 rounded-lg border px-3 py-2 text-xs ${
         isError
-          ? "border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-300"
-          : "border-[var(--accent)]/25 bg-[var(--accent)]/10"
+          ? "border-[var(--danger)]/25 bg-[var(--danger-soft)] text-[var(--danger)]"
+          : "border-[var(--accent)]/25 bg-[var(--accent-soft)] text-[var(--ink)]"
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
         {isDownloading || isInstalling ? (
-          <Spinner className="size-4 shrink-0 text-[var(--accent-text)]" />
+          <Spinner className="size-3.5 shrink-0 text-[var(--accent-text)]" />
         ) : isError ? (
-          <AlertTriangle className="size-4 shrink-0" />
+          <AlertTriangle className="size-3.5 shrink-0" />
         ) : (
-          <Download className="size-4 shrink-0 text-[var(--accent-text)]" />
+          <Download className="size-3.5 shrink-0 text-[var(--accent-text)]" />
         )}
 
         <div className="min-w-0 flex-1">
           {isDownloading && (
             <span>
-              正在下载新版本 v{avail.version}… {progressText}
+              正在下载新版本 v{avail.version}… <span className="tabular-nums">{progressText}</span>
             </span>
           )}
           {isInstalling && <span>正在安装 v{avail.version}，完成后将自动重启…</span>}
           {isError && <span>更新 v{avail.version} 失败：{snapshot.error}</span>}
           {snapshot.phase === "available" && (
             <span>
-              发现新版本 <strong>v{avail.version}</strong>（当前 v{avail.currentVersion}）
+              发现新版本 <strong className="font-semibold">v{avail.version}</strong>
+              <span className="text-[var(--ink-secondary)]">（当前 v{avail.currentVersion}）</span>
               {avail.notes && (
                 <button
+                  type="button"
                   onClick={() => setShowNotes((v) => !v)}
-                  className="ml-2 inline-flex items-center gap-0.5 text-[var(--accent-text)] hover:underline"
+                  className="ml-2 inline-flex cursor-pointer items-center gap-0.5 font-medium text-[var(--accent-text)] hover:underline"
                 >
                   更新说明
                   {showNotes ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
@@ -115,23 +105,24 @@ function UpdateBanner() {
         <div className="flex shrink-0 items-center gap-1.5">
           {snapshot.phase === "available" && (
             <>
-              <Button variant="primary" className="h-7 px-2.5 text-xs" onClick={install}>
+              <Button variant="primary" size="sm" onClick={install}>
                 立即更新
               </Button>
-              <Button variant="subtle" className="h-7 px-2 text-xs opacity-75" onClick={() => ignore(avail.version)}>
+              <Button variant="subtle" size="sm" onClick={() => ignore(avail.version)}>
                 忽略此版本
               </Button>
             </>
           )}
           {isError && (
-            <Button variant="primary" className="h-7 px-2.5 text-xs" onClick={install}>
+            <Button variant="primary" size="sm" onClick={install}>
               重试
             </Button>
           )}
           {!isDownloading && !isInstalling && (
             <button
+              type="button"
               onClick={() => dismissBanner(avail.version)}
-              className="inline-flex size-6 items-center justify-center rounded opacity-60 hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
+              className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-[var(--ink-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
               title="暂时关闭"
             >
               <X className="size-3.5" />
@@ -143,7 +134,7 @@ function UpdateBanner() {
       {isDownloading && <Progress value={ratio} indeterminate={!prog?.total} />}
       {isInstalling && <Progress value={1} indeterminate />}
       {showNotes && avail.notes && snapshot.phase === "available" && (
-        <div className="selectable max-h-36 overflow-y-auto rounded bg-black/[0.04] px-2.5 py-2 leading-relaxed whitespace-pre-wrap opacity-85 dark:bg-white/[0.06]">
+        <div className="selectable max-h-36 overflow-y-auto rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2 leading-relaxed whitespace-pre-wrap text-[var(--ink-secondary)]">
           {avail.notes}
         </div>
       )}
@@ -153,13 +144,21 @@ function UpdateBanner() {
 
 export default function Main() {
   const [page, setPage] = useState<Page>("translate");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [incoming, setIncoming] = useState<IncomingTranslate | null>(null);
   const [hotkeys, setHotkeys] = useState<HotkeyInfo[]>([]);
   const [hotkeyDismissed, setHotkeyDismissed] = useState(false);
+
   const notice = useInference((s) => s.notice);
   const dismissNotice = useInference((s) => s.dismissNotice);
   const settings = useSettings((s) => s.settings);
   const update = useUpdater((s) => s.snapshot);
   const dismissedVersion = useUpdater((s) => s.dismissedVersion);
+
+  const openSettingsAt = useCallback((section: SettingsSection) => {
+    setSettingsSection(section);
+    setPage("settings");
+  }, []);
 
   useEffect(() => {
     startInferenceSync();
@@ -169,12 +168,41 @@ export default function Main() {
       setHotkeys(h);
       setHotkeyDismissed(false);
     });
-    const unNav = events.navigate((p) => (p === "settings" || p === "translate") && setPage(p));
+    const unNav = events.navigate((p) => {
+      if (p === "settings" || p === "translate") setPage(p);
+    });
+    const unOpenTranslate = events.openTranslate((payload) => {
+      setPage("translate");
+      setIncoming((prev) => ({ payload, seq: (prev?.seq ?? 0) + 1 }));
+    });
     return () => {
       unHotkeys.then((f) => f());
       unNav.then((f) => f());
+      unOpenTranslate.then((f) => f());
     };
   }, []);
+
+  // Ctrl+, toggles between Translate and Settings.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key === ",") {
+        e.preventDefault();
+        setPage((p) => (p === "settings" ? "translate" : "settings"));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const resolvedTheme = useResolvedTheme();
+  const isDark = resolvedTheme === "dark";
+
+  const toggleLightDark = () => {
+    api.setTheme(isDark ? "light" : "dark");
+  };
+
+  const miniKeys = hotkeys.find((h) => h.id === "mini" && h.registered)?.keys;
+  const shotKeys = hotkeys.find((h) => h.id === "shot" && h.registered)?.keys;
 
   // Bound but not registered (taken by another program at startup).
   const failedHotkeys = hotkeys.filter((h) => h.keys && !h.registered);
@@ -190,50 +218,97 @@ export default function Main() {
   const hasBanners = showUpdateBanner || !!notice || (failedHotkeys.length > 0 && !hotkeyDismissed);
 
   return (
-    <div className="flex h-full">
-      <nav className="flex w-[68px] shrink-0 flex-col items-center gap-1 py-3">
-        <NavItem
-          active={page === "translate"}
-          icon={<Languages className="size-5" />}
-          label="翻译"
-          onClick={() => setPage("translate")}
-        />
-        <div className="flex-1" />
-        <NavItem
-          active={page === "settings"}
-          icon={<SettingsIcon className="size-5" />}
-          label="设置"
-          dot={showSettingsDot}
-          onClick={() => setPage("settings")}
-        />
-      </nav>
+    <div className="app-shell flex h-full flex-col overflow-hidden">
+      <TitleBar
+        left={
+          <>
+            <div data-tauri-drag-region className="flex items-center gap-2 pr-1">
+              <BrandSeal size="sm" className="pointer-events-none" />
+              <span className="pointer-events-none hidden text-[13px] font-semibold tracking-tight text-[var(--ink)] min-[820px]:inline">
+                LLM Translate
+              </span>
+            </div>
+            <Segmented<Page>
+              size="sm"
+              value={page}
+              onChange={setPage}
+              options={[
+                { value: "translate", label: "翻译", title: "文本翻译（Ctrl+,）" },
+                { value: "settings", label: "设置", title: "偏好与模型设置（Ctrl+,）", dot: showSettingsDot },
+              ]}
+            />
+          </>
+        }
+        right={
+          <>
+            <StatusPill onClick={() => openSettingsAt("models")} />
+            <span className="mx-0.5 h-4 w-px bg-[var(--border)]" />
+            <Button
+              variant="subtle"
+              size="sm"
+              icon={<PanelTop className="size-3.5" />}
+              onClick={() => api.openMini()}
+              title={`打开迷你翻译窗${miniKeys ? `（${miniKeys}）` : ""}`}
+            >
+              <span className="hidden min-[760px]:inline">迷你窗</span>
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
+              icon={<ScanText className="size-3.5" />}
+              onClick={() => api.shotStart()}
+              title={`截图翻译：框选屏幕区域覆盖译文${shotKeys ? `（${shotKeys}）` : ""}`}
+            >
+              <span className="hidden min-[760px]:inline">截图</span>
+            </Button>
+            <button
+              type="button"
+              onClick={toggleLightDark}
+              title={isDark ? "切换到宣纸浅色" : "切换到墨砚深色"}
+              className="inline-flex size-7 cursor-pointer items-center justify-center rounded-[7px] text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+            >
+              {isDark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+            </button>
+          </>
+        }
+      />
 
-      <main className="flex min-w-0 flex-1 flex-col rounded-tl-lg border-t border-l border-[var(--stroke)] bg-[var(--surface)]">
+      <main className="flex min-h-0 flex-1 flex-col">
         {hasBanners && (
-          <div className="flex flex-col gap-2 px-5 pt-4">
+          <div className="flex shrink-0 flex-col gap-2 px-4 pt-3">
             {showUpdateBanner && <UpdateBanner />}
             {notice && (
               <Banner onClose={dismissNotice}>
-                GPU 后端多次失败，已切换到 CPU 并保存设置。原因：{notice.reason}
+                GPU 后端多次失败，已自动切换到 CPU 并保存设置。原因：{notice.reason}
               </Banner>
             )}
             {failedHotkeys.length > 0 && !hotkeyDismissed && (
               <Banner onClose={() => setHotkeyDismissed(true)}>
-                快捷键 {failedHotkeys.map((h) => h.keys).join("、")} 已被其他程序占用，可在
-                <button className="mx-0.5 underline" onClick={() => setPage("settings")}>
-                  设置
+                快捷键 {failedHotkeys.map((h) => h.keys).join("、")} 已被其他程序占用，可前往
+                <button
+                  type="button"
+                  className="mx-1 cursor-pointer font-semibold underline"
+                  onClick={() => openSettingsAt("hotkeys")}
+                >
+                  快捷键设置
                 </button>
-                中更换；迷你窗和截图翻译也可以从翻译页按钮或托盘菜单打开。
+                更换；迷你窗和截图翻译也可以从顶栏或托盘菜单打开。
               </Banner>
             )}
           </div>
         )}
+
         {/* Both pages stay mounted so the translate text survives a trip to settings. */}
         <div className={page === "translate" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-          <TranslatePage hotkeys={hotkeys} />
+          <TranslatePage hotkeys={hotkeys} visible={page === "translate"} incoming={incoming} />
         </div>
         <div className={page === "settings" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-          <SettingsPage hotkeys={hotkeys} visible={page === "settings"} />
+          <SettingsPage
+            hotkeys={hotkeys}
+            visible={page === "settings"}
+            section={settingsSection}
+            onSectionChange={setSettingsSection}
+          />
         </div>
       </main>
     </div>

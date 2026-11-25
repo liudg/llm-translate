@@ -138,7 +138,7 @@ async fn wait_status(sup: &Supervisor, f: impl Fn(&Status) -> bool, secs: u64) -
 async fn translate_text(tr: &Translator, text: &str) -> Result<String, String> {
     let out = std::sync::Mutex::new(String::new());
     let err = std::sync::Mutex::new(None);
-    tr.translate(TranslateRequest { text: text.into(), direction: None }, |ev| match ev {
+    tr.translate("m1_check", TranslateRequest { text: text.into(), direction: None }, |ev| match ev {
         TranslateEvent::Delta { text } => out.lock().unwrap().push_str(&text),
         TranslateEvent::Error { message } => *err.lock().unwrap() = Some(message),
         TranslateEvent::Cancelled => *err.lock().unwrap() = Some("已取消".into()),
@@ -189,7 +189,7 @@ async fn infer(models_dir: &Path) {
     sup.configure(spec(Backend::Vulkan, Some("Vulkan0"))).await;
     let text = "本地翻译模型不依赖网络。\n\n  It has certain hardware requirements.\n----\n今天天气不错。";
     let out = std::sync::Mutex::new(String::new());
-    tr.translate(TranslateRequest { text: text.into(), direction: None }, |ev| {
+    tr.translate("m1_check", TranslateRequest { text: text.into(), direction: None }, |ev| {
         if let TranslateEvent::Delta { text } = &ev {
             out.lock().unwrap().push_str(text);
         } else {
@@ -210,7 +210,7 @@ async fn infer(models_dir: &Path) {
     let (a, b) = tokio::join!(
         async {
             let last = std::sync::Mutex::new(None);
-            tr.translate(TranslateRequest { text: long.clone(), direction: None }, |ev| {
+            tr.translate("m1_check", TranslateRequest { text: long.clone(), direction: None }, |ev| {
                 if !matches!(ev, TranslateEvent::Delta { .. }) {
                     *last.lock().unwrap() = Some(ev);
                 }

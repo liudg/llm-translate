@@ -380,6 +380,12 @@ pub async fn deploy_finish(app: AppHandle, autostart: Option<bool>) {
 pub async fn open_wizard(app: AppHandle) {
     let existed = app.get_webview_window("wizard").is_some();
     if let Ok(w) = crate::app::windows::ensure_window(&app, "wizard") {
+        if let Some(main) = app.get_webview_window("main")
+            && main.is_visible().unwrap_or(false)
+        {
+            crate::app::windows::save_main_placement(&app);
+            let _ = main.hide();
+        }
         if existed {
             let _ = w.emit("wizard-reset", ());
         }

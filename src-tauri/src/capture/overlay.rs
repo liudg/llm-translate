@@ -27,11 +27,13 @@ use super::screen::{Frame, per_monitor_aware};
 
 const CLASS: windows::core::PCWSTR = w!("LLMTranslateShotOverlay");
 /// Brightness of the area outside the selection.
-const DIM: u32 = 140; // of 256
-/// Win11 dark-theme accent, readable on the dimmed frame. COLORREF is 0x00BBGGRR.
-const OUTLINE: COLORREF = COLORREF(0x00FF_C24C);
-const LABEL_BG: COLORREF = COLORREF(0x0020_2020);
-const HINT: &str = "拖动鼠标框选要翻译的区域　Esc 取消";
+const DIM: u32 = 132; // of 256
+/// Signature warm vermilion seal accent (#E06D48), crisp on the dimmed frame. COLORREF is 0x00BBGGRR.
+const OUTLINE: COLORREF = COLORREF(0x0048_6DE0);
+/// Warm obsidian ink pill (#1B1A18) with subtle border (#3F3C36).
+const LABEL_BG: COLORREF = COLORREF(0x0018_1A1B);
+const LABEL_BORDER: COLORREF = COLORREF(0x0036_3C3F);
+const HINT: &str = "拖动鼠标框选要翻译的区域  ·  右键取消选区  ·  Esc 退出";
 /// Posted to take the foreground back from another window of this app.
 const WM_RECLAIM: u32 = WM_APP + 1;
 
@@ -287,11 +289,13 @@ fn draw_text(dc: HDC, text: &str, mut r: RECT) {
 fn pill(dc: HDC, r: RECT, radius: i32) {
     unsafe {
         let brush = CreateSolidBrush(LABEL_BG);
+        let pen = CreatePen(PS_SOLID, 1, LABEL_BORDER);
         let old_brush = SelectObject(dc, brush.into());
-        let old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        let old_pen = SelectObject(dc, pen.into());
         let _ = RoundRect(dc, r.left, r.top, r.right + 1, r.bottom + 1, radius, radius);
         SelectObject(dc, old_pen);
         SelectObject(dc, old_brush);
+        let _ = DeleteObject(pen.into());
         let _ = DeleteObject(brush.into());
     }
 }

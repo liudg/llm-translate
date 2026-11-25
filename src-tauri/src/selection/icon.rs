@@ -10,11 +10,18 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
-/// Window edge in DIPs (the square is 24 with room for the ring and shadow).
-const WINDOW_DIP: f32 = 32.0;
+/// Window edge in DIPs (the seal square is 24 with room for the warm paper ring and shadow).
+const WINDOW_DIP: f32 = 34.0;
 const SQUARE_DIP: f32 = 24.0;
-const ACCENT: (f32, f32, f32) = (0x00 as f32, 0x5f as f32, 0xb8 as f32);
-const ACCENT_HOVER: (f32, f32, f32) = (0x0a as f32, 0x6c as f32, 0xc4 as f32);
+/// Signature vermilion seal accent (#B8431F) & hover (#CE4E26).
+const ACCENT: (f32, f32, f32) = (0xb8 as f32, 0x43 as f32, 0x1f as f32);
+const ACCENT_HOVER: (f32, f32, f32) = (0xce as f32, 0x4e as f32, 0x26 as f32);
+/// Warm paper glyph colour (#FCFBF8).
+const PAPER: (f32, f32, f32) = (0xfc as f32, 0xfb as f32, 0xf8 as f32);
+/// Soft warm-paper outer rim (#F2EEE6), composited semi-transparently so it
+/// stays crisp on light pages without glaring on dark terminals / IDEs.
+const RING: (f32, f32, f32) = (242.0, 238.0, 230.0);
+const RING_ALPHA: f32 = 0.78;
 
 /// DPI scale (1.0 = 96 dpi) of the monitor containing `pt`.
 pub fn scale_at(pt: POINT) -> f32 {
@@ -220,15 +227,15 @@ impl Icon {
                 let d_shadow = rounded_box(fx - cx, fy - cy - 1.5 * s, half + ring, radius + ring);
                 let shadow = {
                     let t = ((d_shadow + 0.5 * s) / (3.5 * s)).clamp(0.0, 1.0);
-                    0.30 * (1.0 - t) * (1.0 - t)
+                    0.24 * (1.0 - t) * (1.0 - t)
                 };
                 let c_outer = (0.5 - d_outer).clamp(0.0, 1.0);
                 let c_inner = (0.5 - d_inner).clamp(0.0, 1.0);
                 // premultiplied (r, g, b, a) in 0..=255
                 let mut c = (0.0f32, 0.0f32, 0.0f32, shadow * 255.0);
-                c = over(c, (255.0, 255.0, 255.0), c_outer);
+                c = over(c, RING, c_outer * RING_ALPHA);
                 c = over(c, accent, c_inner);
-                c = over(c, (255.0, 255.0, 255.0), glyph * c_inner);
+                c = over(c, PAPER, glyph * c_inner);
                 px[i] = c.2.round() as u8;
                 px[i + 1] = c.1.round() as u8;
                 px[i + 2] = c.0.round() as u8;

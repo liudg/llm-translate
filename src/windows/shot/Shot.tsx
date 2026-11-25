@@ -1,9 +1,8 @@
-// Screenshot result window (DESIGN 5.6 step 6): the frozen region at its exact
-// screen position with translations drawn over the original text as they
-// stream in; a toolbar below (or above) it. One window, replaced by the next
-// screenshot; Esc or the close button hides it.
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Check, Copy, Eye, EyeOff, FileText, ImageIcon, X } from "lucide-react";
+// Screenshot result window (DESIGN 5.6): exact 1:1 frozen region with in-place
+// streamed translation overlay + floating precision editorial HUD toolbar.
+// Hold Space to peek original screenshot; Ctrl+C copies translation; Esc closes.
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Check, Copy, FileText, GripVertical, ImageIcon, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, errorText, events, type ShotParagraph, type ShotPayload } from "../../lib/api";
 import { useCopy } from "../../lib/useCopy";
@@ -11,9 +10,11 @@ import { IconButton, Spinner } from "../../components/ui";
 import { startInferenceSync, useInference } from "../../stores/inference";
 import { drawParagraph } from "./render";
 
-/** Toolbar strip in DIPs: a 4 px gap plus the 40 px bar (capture/mod.rs uses 44). */
+/** Toolbar strip in DIPs: 4 px gap + 40 px bar (matches TOOLBAR_HEIGHT = 44 in capture/mod.rs). */
 const BAR_GAP = 4;
 const BAR_HEIGHT = 40;
+const BAR_MIN_WIDTH = 360;
+const BAR_MAX_WIDTH = 520;
 
 type Phase = "ocr" | "translating" | "done" | "error" | "cancelled";
 
@@ -27,21 +28,24 @@ export default function Shot() {
   const [phase, setPhase] = useState<Phase>("ocr");
   const [error, setError] = useState<string | null>(null);
   const [original, setOriginal] = useState(false);
+  const [peeking, setPeeking] = useState(false);
   const [done, setDone] = useState(0);
+
   const textCopy = useCopy();
   const sourceCopy = useCopy();
   const imageCopy = useCopy();
   const status = useInference((s) => s.status);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
-  /** Highest shot id seen, and the id still on screen (0 once hidden). */
   const seen = useRef(0);
   const active = useRef(0);
   const translating = useRef(false);
-  /** DPI scale of the monitor the shot came from. */
+  const peekingRef = useRef(false);
   const scaleRef = useRef(1);
 
-  const draw = useCallback((list: Para[], showOriginal: boolean) => {
+  const showOriginal = original !== peeking;
+
+  const draw = useCallback((list: Para[], orig: boolean) => {
     const canvas = canvasRef.current;
     const base = baseRef.current;
     if (!canvas || !base) return;
@@ -52,7 +56,7 @@ export default function Shot() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(base, 0, 0);
-    if (showOriginal) return;
+    if (orig) return;
     const scale = scaleRef.current;
     for (const p of list) {
       if (p.translatable && p.result) drawParagraph(ctx, p, p.result, scale, base.height);
@@ -71,13 +75,15 @@ export default function Shot() {
       setPhase("ocr");
       setError(null);
       setOriginal(false);
+      peekingRef.current = false;
+      setPeeking(false);
       setDone(0);
 
       let rgba: ArrayBuffer;
       try {
         rgba = await api.shotImage(p.id);
       } catch {
-        return; // closed in the meantime
+        return;
       }
       if (stale()) return;
       const base = document.createElement("canvas");
@@ -154,9 +160,10 @@ export default function Shot() {
     const unHidden = events.shotHidden(() => {
       if (translating.current) api.cancelTranslate();
       translating.current = false;
-      // Late events of the hidden shot are ignored from now on.
       active.current = 0;
       baseRef.current = null;
+      peekingRef.current = false;
+      setPeeking(false);
       setShot(null);
     });
     return () => {
@@ -165,19 +172,22 @@ export default function Shot() {
     };
   }, [load]);
 
-  // Redraw at most once per frame while translations stream in.
   useEffect(() => {
-    const id = requestAnimationFrame(() => draw(paras, original));
+    const id = requestAnimationFrame(() => draw(paras, showOriginal));
     return () => cancelAnimationFrame(id);
-  }, [paras, original, draw, shot]);
+  }, [paras, showOriginal, draw, shot]);
 
   const translations = paras.filter((p) => p.translatable && p.result.trim()).map((p) => p.result.trim());
   const sources = paras.map((p) => p.text);
+
   const copyTranslation = () => {
-    // Ctrl+C also lands here: never overwrite the clipboard with nothing.
-    if (translations.length > 0) textCopy.copy(translations.join("\n"));
+    if (translations.length === 0) return false;
+    textCopy.copy(translations.join("\n"));
+    return true;
   };
-  const copySource = () => sourceCopy.copy(sources.join("\n"));
+  const copySource = () => {
+    if (sources.length > 0) sourceCopy.copy(sources.join("\n"));
+  };
   const copyImage = () => {
     const c = canvasRef.current;
     const ctx = c?.getContext("2d");
@@ -186,15 +196,53 @@ export default function Shot() {
     imageCopy.copy(() => api.shotCopyImage(new Uint8Array(data.data.buffer), c.width, c.height));
   };
 
-  const keyRef = useRef({ copyTranslation, close: () => api.shotClose() });
-  keyRef.current = { copyTranslation, close: () => api.shotClose() };
+  const blurOnMouseClick = (e: MouseEvent<HTMLButtonElement>) => {
+    if (e.detail > 0) e.currentTarget.blur();
+  };
+
+  const keyRef = useRef({ copyTranslation, copyImage, close: () => api.shotClose() });
+  keyRef.current = { copyTranslation, copyImage, close: () => api.shotClose() };
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") keyRef.current.close();
-      else if (e.ctrlKey && e.key.toLowerCase() === "c") keyRef.current.copyTranslation();
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        keyRef.current.close();
+      } else if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        keyRef.current.copyImage();
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "c") {
+        if (keyRef.current.copyTranslation()) {
+          e.preventDefault();
+        }
+      } else if (e.code === "Space" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (document.activeElement instanceof HTMLButtonElement) return;
+        e.preventDefault();
+        if (!e.repeat) {
+          peekingRef.current = true;
+          setPeeking(true);
+        }
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const onUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        if (!peekingRef.current && document.activeElement instanceof HTMLButtonElement) return;
+        e.preventDefault();
+        peekingRef.current = false;
+        setPeeking(false);
+      }
+    };
+    const onBlur = () => {
+      peekingRef.current = false;
+      setPeeking(false);
+    };
+    window.addEventListener("keydown", onDown, true);
+    window.addEventListener("keyup", onUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown, true);
+      window.removeEventListener("keyup", onUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
   }, []);
 
   if (!shot) return null;
@@ -202,80 +250,206 @@ export default function Shot() {
   const total = paras.filter((p) => p.translatable).length;
   let statusText: ReactNode;
   let busy = false;
+  let progressRatio = 0;
+
   if (phase === "ocr") {
     busy = true;
     statusText = "正在识别文字…";
   } else if (phase === "translating") {
     busy = true;
-    statusText = status.state === "loading" ? "正在加载模型…" : `正在翻译 ${done}/${total}`;
+    progressRatio = total > 0 ? done / total : 0;
+    statusText = status.state === "loading" ? "正在加载模型…" : `翻译中 ${done}/${total}`;
   } else if (phase === "error") {
-    statusText = <span className="text-red-600 dark:text-red-400">{error}</span>;
+    statusText = <span className="text-[var(--danger)]">{error}</span>;
   } else if (phase === "cancelled") {
-    statusText = "已被其他翻译请求中断";
+    statusText = "已被其他请求中断";
   } else if (paras.length === 0) {
     statusText = "未识别到文字";
   } else if (total === 0) {
-    statusText = "没有需要翻译的文字";
+    statusText = "无须翻译的文字";
   } else {
-    statusText = `已翻译 ${total} 段`;
+    statusText = `已译 ${total} 段`;
   }
 
-  // Sizes in CSS pixels of the capture monitor. Dragged to a monitor with
-  // another scale, Windows rescales the window and these stay proportional.
   const dpr = shot.cssScale;
+  const imgLeft = shot.imageX / dpr;
+  const imgWidth = shot.width / dpr;
+  const imgHeight = shot.height / dpr;
   const imgStyle = {
-    left: shot.imageX / dpr,
+    left: imgLeft,
     top: shot.imageY / dpr,
-    width: shot.width / dpr,
-    height: shot.height / dpr,
+    width: imgWidth,
+    height: imgHeight,
   };
-  const barStyle: CSSProperties =
-    shot.toolbar === "below"
-      ? { top: shot.height / dpr + BAR_GAP }
+  const winWidth = Math.max(imgWidth, BAR_MIN_WIDTH);
+  const inside = shot.toolbar === "inside";
+  const inset = inside ? BAR_GAP : 0;
+  const availWidth = Math.max(0, winWidth - inset * 2);
+  const minBarWidth = Math.min(BAR_MIN_WIDTH, availWidth);
+  const rightEdge = Math.min(winWidth - inset, Math.max(inset + minBarWidth, imgLeft + imgWidth - inset));
+  const rightOffset = Math.max(inset, winWidth - rightEdge);
+  const barStyle: CSSProperties = {
+    height: BAR_HEIGHT,
+    right: rightOffset,
+    minWidth: inside ? `min(${BAR_MIN_WIDTH}px, calc(100% - ${BAR_GAP * 2}px))` : `min(${BAR_MIN_WIDTH}px, 100%)`,
+    maxWidth:
+      rightOffset > inset
+        ? Math.min(BAR_MAX_WIDTH, rightEdge - inset)
+        : inside
+          ? `min(${BAR_MAX_WIDTH}px, calc(100% - ${BAR_GAP * 2}px))`
+          : `min(${BAR_MAX_WIDTH}px, 100%)`,
+    ...(shot.toolbar === "below"
+      ? { top: imgHeight + BAR_GAP }
       : shot.toolbar === "above"
         ? { top: 0 }
-        : { bottom: BAR_GAP, left: BAR_GAP, right: BAR_GAP };
+        : { bottom: BAR_GAP }),
+  };
+
+  const hasTranslations = translations.length > 0;
 
   return (
     <div className="relative h-full w-full overflow-hidden">
       <canvas
         ref={canvasRef}
-        className="absolute cursor-move outline outline-1 -outline-offset-1 outline-[var(--accent)]/60"
+        className="absolute cursor-move outline outline-1 -outline-offset-1 outline-[var(--accent)]/75"
         style={imgStyle}
         onMouseDown={(e) => {
           if (e.button === 0) getCurrentWindow().startDragging();
         }}
       />
+
+      {/* Floating Precision Editorial HUD Bar */}
       <div
         data-tauri-drag-region
-        className="absolute right-0 left-0 flex items-center gap-0.5 rounded-lg border border-black/10 bg-[#f9f9f9] px-1.5 text-sm text-[#1a1a1a] dark:border-white/10 dark:bg-[#2b2b2b] dark:text-[#f3f3f3]"
-        style={{ height: BAR_HEIGHT, ...barStyle }}
+        className="absolute flex w-max min-w-[360px] max-w-[520px] items-center gap-1 overflow-hidden rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-surface)]/96 px-1.5 text-xs text-[var(--ink)] shadow-[0_8px_22px_rgb(0_0_0/0.22)]"
+        style={barStyle}
       >
-        <span data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2 truncate px-1.5 text-xs">
-          {busy && <Spinner className="pointer-events-none shrink-0 text-[var(--accent-text)]" />}
-          <span data-tauri-drag-region className="truncate opacity-75" title={typeof statusText === "string" ? statusText : (error ?? "")}>
+        {/* Subtle drag handle & live status */}
+        <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-1.5 truncate pr-1 pl-0.5">
+          <GripVertical className="pointer-events-none size-3.5 shrink-0 text-[var(--ink-muted)] opacity-70" />
+          {busy ? (
+            <Spinner className="pointer-events-none size-3.5 shrink-0 text-[var(--accent)]" />
+          ) : (
+            <span
+              className={`pointer-events-none size-1.5 shrink-0 rounded-full ${
+                phase === "error"
+                  ? "bg-[var(--danger)]"
+                  : phase === "done" && total > 0
+                    ? "bg-[var(--good)]"
+                    : "bg-[var(--ink-muted)]"
+              }`}
+            />
+          )}
+          <span
+            data-tauri-drag-region
+            className="truncate text-[12px] font-medium text-[var(--ink-secondary)] tabular-nums"
+            title={typeof statusText === "string" ? statusText : (error ?? "")}
+          >
             {statusText}
           </span>
-        </span>
-        <IconButton
-          title={original ? "显示译文" : "显示原图"}
-          onClick={() => setOriginal((v) => !v)}
-          disabled={translations.length === 0}
+        </div>
+
+        {/* Tactile 译文 / 原图 segmented toggle (also supports holding Space) */}
+        <div
+          title="切换显示译文或原图（按住空格键可临时透视对比）"
+          className={`inline-flex shrink-0 items-center rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-recessed)] p-[2px] ${
+            !hasTranslations ? "opacity-45" : ""
+          }`}
         >
-          {original ? <EyeOff className="size-4 text-[var(--accent-text)]" /> : <Eye className="size-4" />}
+          <button
+            type="button"
+            disabled={!hasTranslations}
+            onClick={(e) => {
+              blurOnMouseClick(e);
+              setOriginal(false);
+            }}
+            className={`h-6 cursor-pointer rounded-[5px] px-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+              !showOriginal
+                ? "bg-[var(--bg-elevated)] text-[var(--ink)] shadow-[var(--shadow-xs)]"
+                : "text-[var(--ink-secondary)] hover:text-[var(--ink)]"
+            }`}
+          >
+            译文
+          </button>
+          <button
+            type="button"
+            disabled={!hasTranslations}
+            onClick={(e) => {
+              blurOnMouseClick(e);
+              setOriginal(true);
+            }}
+            className={`h-6 cursor-pointer rounded-[5px] px-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+              showOriginal
+                ? "bg-[var(--bg-elevated)] text-[var(--accent-text)] shadow-[var(--shadow-xs)]"
+                : "text-[var(--ink-secondary)] hover:text-[var(--ink)]"
+            }`}
+          >
+            原图
+          </button>
+        </div>
+
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--border)]" />
+
+        {/* Grouped copy & close actions */}
+        <IconButton
+          size="sm"
+          title={textCopy.copied ? "已复制全部译文" : "复制全部译文（Ctrl+C）"}
+          onClick={(e) => {
+            blurOnMouseClick(e);
+            copyTranslation();
+          }}
+          disabled={!hasTranslations}
+        >
+          {textCopy.copied ? <Check className="size-3.5 text-[var(--good)]" /> : <Copy className="size-3.5" />}
         </IconButton>
-        <IconButton title="复制全部译文（Ctrl+C）" onClick={copyTranslation} disabled={translations.length === 0}>
-          {textCopy.copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+
+        <IconButton
+          size="sm"
+          title={sourceCopy.copied ? "已复制原文" : "复制识别原文"}
+          onClick={(e) => {
+            blurOnMouseClick(e);
+            copySource();
+          }}
+          disabled={sources.length === 0}
+        >
+          {sourceCopy.copied ? <Check className="size-3.5 text-[var(--good)]" /> : <FileText className="size-3.5" />}
         </IconButton>
-        <IconButton title="复制原文" onClick={copySource} disabled={sources.length === 0}>
-          {sourceCopy.copied ? <Check className="size-4" /> : <FileText className="size-4" />}
+
+        <IconButton
+          size="sm"
+          title={imageCopy.copied ? "已复制图片" : `${showOriginal ? "复制原图" : "复制译图"}（Ctrl+Shift+C）`}
+          onClick={(e) => {
+            blurOnMouseClick(e);
+            copyImage();
+          }}
+        >
+          {imageCopy.copied ? <Check className="size-3.5 text-[var(--good)]" /> : <ImageIcon className="size-3.5" />}
         </IconButton>
-        <IconButton title={original ? "复制原图" : "复制译图"} onClick={copyImage}>
-          {imageCopy.copied ? <Check className="size-4" /> : <ImageIcon className="size-4" />}
+
+        <IconButton
+          size="sm"
+          title="关闭（Esc）"
+          onClick={(e) => {
+            blurOnMouseClick(e);
+            api.shotClose();
+          }}
+        >
+          <X className="size-3.5" />
         </IconButton>
-        <IconButton title="关闭（Esc）" onClick={() => api.shotClose()}>
-          <X className="size-4" />
-        </IconButton>
+
+        {/* Precision bottom progress beam while OCR / translating */}
+        {busy && (
+          <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-[2px] bg-[var(--accent-soft)]">
+            {phase === "ocr" || total === 0 ? (
+              <div className="progress-indeterminate h-full w-1/3 bg-[var(--accent)]" />
+            ) : (
+              <div
+                className="h-full bg-[var(--accent)] transition-[width] duration-200"
+                style={{ width: `${Math.min(100, Math.round(progressRatio * 100))}%` }}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-// Streaming translation state shared by the main and mini windows.
+// Streaming translation state shared by the main, mini and popup windows.
 import { useCallback, useRef, useState } from "react";
 import { api, type Direction } from "./api";
 
@@ -8,6 +8,21 @@ export const DIR_LABEL: Record<Direction, string> = { zh2En: "中文 → 英语"
 export const DIR_SHORT: Record<DirChoice, string> = { auto: "自动", zh2En: "中 → 英", en2Zh: "英 → 中" };
 /** Order of the direction toggle in the mini window and the popup. */
 export const NEXT_CHOICE: Record<DirChoice, DirChoice> = { auto: "zh2En", zh2En: "en2Zh", en2Zh: "auto" };
+
+/** Guard against WebView2 / Windows IME composition commits (including keyCode 229 / Process). */
+export function isImeComposing(e: {
+  nativeEvent?: { isComposing?: boolean };
+  isComposing?: boolean;
+  keyCode?: number;
+  key?: string;
+}): boolean {
+  return Boolean(
+    e.isComposing ||
+      e.nativeEvent?.isComposing ||
+      e.keyCode === 229 ||
+      e.key === "Process",
+  );
+}
 
 export interface TranslatorState {
   /** Text and direction of the latest request. */
@@ -40,10 +55,12 @@ const EMPTY: TranslatorState = {
 export function useTranslator() {
   const [state, setState] = useState<TranslatorState>(EMPTY);
   const reqId = useRef(0);
+  const busyRef = useRef(false);
   const userStopped = useRef(false);
 
   const run = useCallback(async (source: string, choice: DirChoice) => {
     const id = ++reqId.current;
+    busyRef.current = true;
     userStopped.current = false;
     setState({ ...EMPTY, source, choice, busy: true });
     const mine = (f: (s: TranslatorState) => TranslatorState) => {
@@ -72,7 +89,10 @@ export function useTranslator() {
     } catch (e) {
       mine((s) => ({ ...s, error: String(e) }));
     }
-    mine((s) => ({ ...s, busy: false }));
+    if (id === reqId.current) {
+      busyRef.current = false;
+      setState((s) => ({ ...s, busy: false }));
+    }
   }, []);
 
   const stop = useCallback(() => {
@@ -80,14 +100,52 @@ export function useTranslator() {
     api.cancelTranslate();
   }, []);
 
-  /** Forget the current request (cancelling it if it is still running). */
+  /** Forget the current request (cancelling it if it is still running in this window). */
   const clear = useCallback(() => {
-    if (reqId.current && state.busy) api.cancelTranslate();
+    if (reqId.current && busyRef.current) api.cancelTranslate();
+    busyRef.current = false;
     reqId.current++;
+    userStopped.current = false;
     setState(EMPTY);
-  }, [state.busy]);
+  }, []);
 
-  return { state, run, stop, clear };
+  /** Abandon the local stream without calling backend cancel (used for handoff to Main). */
+  const drop = useCallback(() => {
+    busyRef.current = false;
+    reqId.current++;
+    userStopped.current = false;
+    setState(EMPTY);
+  }, []);
+
+  /** Populate a completed translation directly without re-running inference. */
+  const hydrate = useCallback(
+    (init: {
+      source: string;
+      choice: DirChoice;
+      result: string;
+      direction: Direction | null;
+      mixed: boolean;
+      elapsedMs: number | null;
+    }) => {
+      busyRef.current = false;
+      reqId.current++;
+      userStopped.current = false;
+      setState({
+        source: init.source,
+        choice: init.choice,
+        result: init.result,
+        busy: false,
+        direction: init.direction,
+        mixed: init.mixed,
+        elapsedMs: init.elapsedMs,
+        error: null,
+        stopped: null,
+      });
+    },
+    [],
+  );
+
+  return { state, run, stop, clear, drop, hydrate };
 }
 
 /** Footer label: the direction a request used and how long it took. */

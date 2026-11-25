@@ -1,11 +1,8 @@
-// Shortcut recorder (DESIGN 5.7). Click to record: all global shortcuts are
-// paused meanwhile so pressing a bound combination records it instead of
-// firing it. Esc cancels, Backspace / Delete unbinds. The backend registers the
-// new combination before saving; if another program holds it the old binding
-// stays and the error is shown.
+// Shortcut recorder (DESIGN 5.7): tactile keycap recorder with live held-key preview.
 import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { api, errorText, type HotkeyId, type HotkeyInfo } from "../../lib/api";
-import { Badge } from "../../components/ui";
+import { Badge, Kbd } from "../../components/ui";
 
 const NAMED: Record<string, string> = {
   Space: "Space",
@@ -76,28 +73,12 @@ function modifiers(e: KeyboardEvent): string[] {
   return mods;
 }
 
-function Keys({ keys, dim = false }: { keys: string; dim?: boolean }) {
-  return (
-    <span className={`flex items-center gap-1 ${dim ? "opacity-60" : ""}`}>
-      {keys.split("+").map((k, i) => (
-        <kbd
-          key={i}
-          className="min-w-6 rounded border border-[var(--stroke)] bg-[var(--surface)] px-1.5 py-0.5 text-center text-xs"
-        >
-          {k}
-        </kbd>
-      ))}
-    </span>
-  );
-}
-
 /** The recorder that is recording; starting another one ends it first. */
 let active: { stop: (resume?: boolean) => void } | null = null;
 
 /**
- * Pause / resume / set run strictly in the order the page issued them: the
- * commands run concurrently in the backend, and a resume overtaking its pause
- * (record, then leave the page at once) would leave every shortcut off.
+ * Pause / resume / set run strictly in the order the page issued them so a
+ * resume never overtakes its pause.
  */
 let queue: Promise<unknown> = Promise.resolve();
 function inOrder<T>(f: () => Promise<T>): Promise<T> {
@@ -124,7 +105,6 @@ export function HotkeyRecorder({
   const recordingRef = useRef(false);
   const self = useRef({ stop: (_resume?: boolean) => {} });
 
-  /** `resume: false` when another recorder takes over (shortcuts stay paused). */
   const stop = (resume = true) => {
     if (!recordingRef.current) return;
     recordingRef.current = false;
@@ -149,14 +129,29 @@ export function HotkeyRecorder({
 
   const save = async (keys: string | null) => {
     setBusy(true);
+    setError(null);
     try {
       await inOrder(() => api.hotkeySet(id, keys));
       setError(null);
+      stop();
+    } catch (e) {
+      setError(errorText(e));
+      setHeld([]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearDirect = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await inOrder(() => api.hotkeySet(id, null));
     } catch (e) {
       setError(errorText(e));
     } finally {
       setBusy(false);
-      stop();
     }
   };
 
@@ -182,7 +177,7 @@ export function HotkeyRecorder({
         return;
       }
       if (!mods.some((m) => m !== "Shift")) {
-        setError("快捷键需要包含 Ctrl、Alt 或 Win");
+        setError("快捷键需要包含 Ctrl 或 Alt（推荐 Alt / Ctrl+Alt / Ctrl+Shift）");
         return;
       }
       void save([...mods, key].join("+"));
@@ -191,7 +186,6 @@ export function HotkeyRecorder({
       e.preventDefault();
       setHeld(modifiers(e));
     };
-    // Switching away cancels: the other app would get the keys anyway.
     const blur = () => stop();
     window.addEventListener("keydown", down, true);
     window.addEventListener("keyup", up, true);
@@ -204,8 +198,6 @@ export function HotkeyRecorder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording, busy]);
 
-  // Leaving the page (hidden, or unmounted) must not keep capturing keys or
-  // leave shortcuts paused.
   useEffect(() => {
     if (!visible) stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,34 +205,66 @@ export function HotkeyRecorder({
   useEffect(() => () => stop(), []);
 
   const keys = info?.keys ?? null;
+
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-end gap-1.5">
       <div className="flex items-center gap-2">
-        {!recording && keys && info && (info.registered ? <Badge tone="good">已生效</Badge> : <Badge tone="warn">未生效</Badge>)}
-        <button
-          onClick={recording ? () => stop() : start}
-          title={recording ? "Esc 取消 · Backspace 清除" : "点击后按下新的快捷键"}
-          className={`flex h-8 min-w-36 items-center justify-center rounded-md border px-2 text-sm transition-colors ${
-            recording
-              ? "border-[var(--accent)] bg-[var(--accent)]/[0.08]"
-              : "border-[var(--stroke)] bg-[var(--surface-strong)] hover:border-[var(--accent)]"
-          }`}
-        >
-          {recording ? (
-            held.length > 0 ? (
-              <Keys keys={[...held, "…"].join("+")} dim />
+        {!recording &&
+          keys &&
+          info &&
+          (info.registered ? <Badge tone="good">已生效</Badge> : <Badge tone="warn">未生效</Badge>)}
+
+        <div className="group/rec relative flex items-center">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={recording ? () => stop() : start}
+            title={recording ? "Esc 取消 · Backspace 清除" : "点击后按下新的快捷键"}
+            className={`flex h-9 min-w-[146px] cursor-pointer items-center justify-center rounded-lg border px-3 text-xs transition-all ${
+              recording
+                ? "border-[var(--accent)] bg-[var(--accent-soft)] ring-2 ring-[var(--accent-ring)]"
+                : "border-[var(--border)] bg-[var(--bg-surface-alt)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
+            }`}
+          >
+            {recording ? (
+              held.length > 0 ? (
+                <Kbd keys={[...held, "…"].join("+")} dim />
+              ) : (
+                <span className="inline-flex items-center gap-1.5 font-medium text-[var(--accent-text)]">
+                  <span className="size-1.5 animate-pulse rounded-full bg-[var(--accent)]" />
+                  请按下快捷键…
+                </span>
+              )
+            ) : keys ? (
+              <Kbd keys={keys} />
             ) : (
-              <span className="text-xs text-[var(--accent-text)]">请按下快捷键…</span>
-            )
-          ) : keys ? (
-            <Keys keys={keys} />
-          ) : (
-            <span className="text-xs opacity-60">未绑定</span>
-          )}
-        </button>
+              <span className="text-[var(--ink-muted)]">点击录制快捷键</span>
+            )}
+          </button>
+
+          {/* Fixed right slot prevents horizontal layout shift when toggling recording mode */}
+          <div className="ml-1 flex size-7 shrink-0 items-center justify-center">
+            {!recording && keys && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={clearDirect}
+                title="解除快捷键绑定"
+                className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-[var(--ink-muted)] opacity-0 transition-opacity group-hover/rec:opacity-100 hover:bg-[var(--bg-hover)] hover:text-[var(--ink)] focus:opacity-100"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
-      {recording && <span className="text-[11px] opacity-60">Esc 取消 · Backspace 清除绑定</span>}
-      {error && <span className="max-w-72 text-right text-xs text-red-600 dark:text-red-400">{error}</span>}
+
+      {recording && (
+        <span className="text-[11px] text-[var(--ink-muted)]">
+          推荐 Alt / Ctrl+Alt / Ctrl+Shift 组合 · Esc 取消 · Backspace 解除绑定
+        </span>
+      )}
+      {error && <span className="max-w-72 text-right text-xs text-[var(--danger)]">{error}</span>}
     </div>
   );
 }

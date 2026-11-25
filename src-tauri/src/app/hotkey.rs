@@ -91,18 +91,44 @@ fn set_field(h: &mut HotkeySettings, id: &str, keys: Option<String>) {
 }
 
 /// Parse a display string. The global-hotkey parser calls the Windows key
-/// `Super` and only knows some punctuation by name.
+/// `Super` and expects `KeyboardEvent.code`-style names for punctuation,
+/// arrows and numpad keys.
 pub fn parse(keys: &str) -> Result<Shortcut, String> {
     let tokens: Vec<String> = keys
         .split('+')
         .map(|t| {
             match t.trim() {
                 "Win" => "Super",
+                "`" => "Backquote",
                 "-" => "Minus",
-                "." => "Period",
-                "'" => "Quote",
+                "=" => "Equal",
+                "[" => "BracketLeft",
+                "]" => "BracketRight",
+                "\\" => "Backslash",
                 ";" => "Semicolon",
+                "'" => "Quote",
+                "," => "Comma",
+                "." => "Period",
                 "/" => "Slash",
+                "Up" => "ArrowUp",
+                "Down" => "ArrowDown",
+                "Left" => "ArrowLeft",
+                "Right" => "ArrowRight",
+                "Num0" => "Numpad0",
+                "Num1" => "Numpad1",
+                "Num2" => "Numpad2",
+                "Num3" => "Numpad3",
+                "Num4" => "Numpad4",
+                "Num5" => "Numpad5",
+                "Num6" => "Numpad6",
+                "Num7" => "Numpad7",
+                "Num8" => "Numpad8",
+                "Num9" => "Numpad9",
+                "NumAdd" => "NumpadAdd",
+                "NumSubtract" => "NumpadSubtract",
+                "NumMultiply" => "NumpadMultiply",
+                "NumDivide" => "NumpadDivide",
+                "NumDecimal" => "NumpadDecimal",
                 other => other,
             }
             .to_string()
@@ -330,5 +356,44 @@ mod tests {
         assert!(parse("Shift+A").is_err());
         assert!(parse("Q").is_err());
         assert!(parse("Ctrl+Nope").is_err());
+    }
+
+    #[test]
+    fn parses_punctuation_arrows_and_numpad() {
+        let cases = [
+            ("Alt+`", Code::Backquote),
+            ("Alt+-", Code::Minus),
+            ("Alt+=", Code::Equal),
+            ("Alt+[", Code::BracketLeft),
+            ("Alt+]", Code::BracketRight),
+            ("Alt+\\", Code::Backslash),
+            ("Alt+;", Code::Semicolon),
+            ("Alt+'", Code::Quote),
+            ("Alt+,", Code::Comma),
+            ("Alt+.", Code::Period),
+            ("Alt+/", Code::Slash),
+            ("Ctrl+Up", Code::ArrowUp),
+            ("Ctrl+Down", Code::ArrowDown),
+            ("Ctrl+Left", Code::ArrowLeft),
+            ("Ctrl+Right", Code::ArrowRight),
+            ("Ctrl+Num0", Code::Numpad0),
+            ("Ctrl+Num1", Code::Numpad1),
+            ("Ctrl+Num2", Code::Numpad2),
+            ("Ctrl+Num3", Code::Numpad3),
+            ("Ctrl+Num4", Code::Numpad4),
+            ("Ctrl+Num5", Code::Numpad5),
+            ("Ctrl+Num6", Code::Numpad6),
+            ("Ctrl+Num7", Code::Numpad7),
+            ("Ctrl+Num8", Code::Numpad8),
+            ("Ctrl+Num9", Code::Numpad9),
+            ("Ctrl+NumAdd", Code::NumpadAdd),
+            ("Ctrl+NumSubtract", Code::NumpadSubtract),
+            ("Ctrl+NumMultiply", Code::NumpadMultiply),
+            ("Ctrl+NumDivide", Code::NumpadDivide),
+            ("Ctrl+NumDecimal", Code::NumpadDecimal),
+        ];
+        for (keys, expected) in cases {
+            assert_eq!(parse(keys).unwrap_or_else(|e| panic!("{keys}: {e}")).key, expected, "{keys}");
+        }
     }
 }

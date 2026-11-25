@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use super::paths;
@@ -11,6 +11,7 @@ use super::settings::{Backend, SelectionSettings, Theme};
 use crate::deploy::hardware::{self, HardwareInfo};
 use crate::selection::blacklist::{self, WindowProcess};
 use crate::state::AppState;
+use crate::translate::detect::Direction;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +32,15 @@ pub fn app_info(state: State<'_, AppInfo>) -> AppInfo {
 #[tauri::command]
 pub fn set_theme(state: State<'_, AppState>, theme: Theme) -> Result<(), String> {
     state.settings.save(|s| s.theme = theme)
+}
+
+/// Re-apply native window theme and Win10 solid backing colour when the OS
+/// toggles light/dark mode while `Theme::System` is active.
+#[tauri::command]
+pub fn sync_system_theme(app: AppHandle, state: State<'_, AppState>) {
+    if state.settings.get().theme == Theme::System {
+        super::windows::apply_theme(&app, Theme::System);
+    }
 }
 
 #[tauri::command]
@@ -97,6 +107,34 @@ pub async fn open_mini(app: AppHandle) {
     super::windows::show_mini(&app);
 }
 
+/// Structured payload for Mini / Popup -> Main "open in main window" handoff,
+/// preserving direction lock and any already-completed translation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenTranslatePayload {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<String>, // "auto" | "zh2En" | "en2Zh"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<Direction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mixed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
+}
+
+/// Show the main window on the Translate page and hand off `payload` to it
+/// (used by Mini / Popup "open in main window" handoff).
+#[tauri::command]
+pub async fn open_main_with_text(app: AppHandle, payload: OpenTranslatePayload) {
+    use tauri::Emitter;
+    super::windows::show_main(&app);
+    let _ = app.emit_to("main", "navigate", "translate");
+    let _ = app.emit_to("main", "open-translate", payload);
+}
+
 /// Replace the selection-translation settings; the hook picks them up through
 /// the settings forwarder.
 #[tauri::command]
@@ -122,4 +160,30 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
 #[tauri::command]
 pub async fn window_processes() -> Vec<WindowProcess> {
     tauri::async_runtime::spawn_blocking(blacklist::window_processes).await.unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_translate_payload_serde_camel_case() {
+        let minimal: OpenTranslatePayload = serde_json::from_str(r#"{"text":"hello"}"#).unwrap();
+        assert_eq!(minimal.text, "hello");
+        assert!(minimal.choice.is_none());
+        assert!(minimal.result.is_none());
+        assert!(minimal.direction.is_none());
+        assert!(minimal.mixed.is_none());
+        assert!(minimal.elapsed_ms.is_none());
+        assert_eq!(serde_json::to_string(&minimal).unwrap(), r#"{"text":"hello"}"#);
+
+        let full_json = r#"{"text":"你好","choice":"zh2En","result":"Hello","direction":"zh2En","mixed":false,"elapsedMs":142}"#;
+        let full: OpenTranslatePayload = serde_json::from_str(full_json).unwrap();
+        assert_eq!(full.choice.as_deref(), Some("zh2En"));
+        assert_eq!(full.result.as_deref(), Some("Hello"));
+        assert_eq!(full.direction, Some(Direction::Zh2En));
+        assert_eq!(full.mixed, Some(false));
+        assert_eq!(full.elapsed_ms, Some(142));
+        assert_eq!(serde_json::to_string(&full).unwrap(), full_json);
+    }
 }

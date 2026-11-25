@@ -24,9 +24,9 @@ const BACKDROP_LABELS: [&str; 4] = ["main", "wizard", "mini", "popup"];
 /// OS build cached at startup so lazy-created windows pick the same backdrop.
 static OS_BUILD: AtomicU32 = AtomicU32::new(0);
 
-/// Fluent solid backing colours for Win10 (must match `src/index.css`).
-const SOLID_LIGHT: Color = Color(0xf3, 0xf3, 0xf3, 0xff);
-const SOLID_DARK: Color = Color(0x20, 0x20, 0x20, 0xff);
+/// Editorial paper & charcoal ink solid backing colours for Win10 (must match `src/index.css`).
+const SOLID_LIGHT: Color = Color(0xf4, 0xf1, 0xea, 0xff);
+const SOLID_DARK: Color = Color(0x12, 0x11, 0x10, 0xff);
 
 /// Win11 (build >= 22000) -> Mica; Win10 has no Mica and its Acrylic lags
 /// badly on drag/resize, so it gets a solid Fluent fill (DESIGN 2 / 8).
@@ -42,6 +42,15 @@ fn system_uses_dark_mode() -> bool {
         .is_ok_and(|v| v == 0)
 }
 
+/// Whether the resolved theme is dark (resolves `Theme::System` via registry).
+fn resolved_dark(theme: Theme) -> bool {
+    match theme {
+        Theme::Dark => true,
+        Theme::Light => false,
+        Theme::System => system_uses_dark_mode(),
+    }
+}
+
 /// Windows "Text size" (Settings > Accessibility), e.g. 1.25. WebView2
 /// multiplies it into the page's device pixel ratio, so one CSS pixel is
 /// `scale_factor * text_scale()` physical pixels, while tao's logical pixels
@@ -55,12 +64,17 @@ pub fn text_scale() -> f64 {
 }
 
 fn solid_color(theme: Theme) -> Color {
-    let dark = match theme {
-        Theme::Dark => true,
-        Theme::Light => false,
-        Theme::System => system_uses_dark_mode(),
-    };
-    if dark { SOLID_DARK } else { SOLID_LIGHT }
+    if resolved_dark(theme) { SOLID_DARK } else { SOLID_LIGHT }
+}
+
+/// First-frame DOM attributes injected before HTML/CSS paints, preventing a
+/// light flash in dark mode and flagging Win10 solid backing for `index.css`.
+fn init_script(dark: bool, solid: bool) -> String {
+    let theme = if dark { "dark" } else { "light" };
+    let effect = if solid { "e.dataset.effect='solid';" } else { "" };
+    format!(
+        "(function(){{var f=function(){{var e=document.documentElement;if(!e)return false;e.dataset.theme='{theme}';{effect}return true;}};if(!f())document.addEventListener('DOMContentLoaded',f,{{once:true}});}})();"
+    )
 }
 
 fn tauri_theme(theme: Theme) -> Option<tauri::Theme> {
@@ -98,21 +112,20 @@ pub fn ensure_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindo
         .ok_or_else(|| tauri::Error::WebviewNotFound)?;
     let theme = app.state::<crate::state::AppState>().settings.get().theme;
     let cfg = scaled_config(app, cfg);
-    let builder = WebviewWindowBuilder::from_config(app, &cfg)?;
+    let is_shot = cfg.label == crate::capture::LABEL;
+    let solid = !is_shot && !uses_mica(OS_BUILD.load(Ordering::Relaxed));
+    let builder = WebviewWindowBuilder::from_config(app, &cfg)?
+        .initialization_script(init_script(resolved_dark(theme), solid));
     // The screenshot result window must show the image exactly, with
     // see-through margins: no backdrop.
-    let builder = if cfg.label == crate::capture::LABEL {
+    let builder = if is_shot {
         builder
-    } else if uses_mica(OS_BUILD.load(Ordering::Relaxed)) {
+    } else if !solid {
         builder.effects(EffectsBuilder::new().effect(Effect::Mica).build())
     } else {
         // Win10 solid fallback: disable transparency for crisp shadows and
-        // fast composition, set the WebView2 backing colour, and flag the
-        // DOM before first paint so index.css paints the matching solid fill.
-        builder
-            .transparent(false)
-            .background_color(solid_color(theme))
-            .initialization_script("document.documentElement.dataset.effect='solid';")
+        // fast composition, and set the WebView2 backing colour to match index.css.
+        builder.transparent(false).background_color(solid_color(theme))
     };
     let win = match builder.build() {
         Ok(w) => w,
@@ -305,6 +318,17 @@ pub fn restore_main_placement(app: &AppHandle) {
     }
 }
 
+const MINI_WIDTH: f64 = 640.0;
+
+/// Target physical X for centering the mini window on a monitor work area,
+/// derived from the destination monitor's scale factor and Windows text scale
+/// (never from the window's pre-move size on a previous DPI).
+fn mini_center_x(area_x: i32, area_w: u32, scale_factor: f64, text_scale: f64) -> i32 {
+    let w = (MINI_WIDTH * scale_factor * text_scale).round() as i32;
+    let max_x = (area_x + area_w as i32 - w).max(area_x);
+    (area_x + (area_w as i32 - w) / 2).clamp(area_x, max_x)
+}
+
 /// Put the mini window on the monitor under the cursor: horizontally centred,
 /// its top edge at a quarter of the work area so the result grows downward
 /// without moving the input box.
@@ -315,9 +339,9 @@ fn place_mini(win: &WebviewWindow) {
         .ok()
         .flatten()
         .or_else(|| win.primary_monitor().ok().flatten());
-    let (Some(m), Ok(size)) = (monitor, win.outer_size()) else { return };
+    let Some(m) = monitor else { return };
     let area = m.work_area();
-    let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
+    let x = mini_center_x(area.position.x, area.size.width, m.scale_factor(), text_scale());
     let y = area.position.y + area.size.height as i32 / 4;
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }
@@ -353,5 +377,30 @@ mod tests {
         assert!(!uses_mica(21999));
         assert!(uses_mica(22000)); // Win11 21H2
         assert!(uses_mica(26200)); // Win11 24H2+
+    }
+
+    #[test]
+    fn mini_centers_using_target_monitor_dpi() {
+        // 1080p @ 100%, text scale 1.0 -> w = 640, x = (1920 - 640) / 2 = 640
+        assert_eq!(mini_center_x(0, 1920, 1.0, 1.0), 640);
+        // Secondary 1080p @ 100% to the right of a 4K screen
+        assert_eq!(mini_center_x(3840, 1920, 1.0, 1.0), 4480);
+        // 4K @ 200%, text scale 1.0 -> w = 1280, x = (3840 - 1280) / 2 = 1280
+        assert_eq!(mini_center_x(0, 3840, 2.0, 1.0), 1280);
+        // 150% DPI + 125% Windows text scale -> w = 1200, x = (1920 - 1200) / 2 = 360
+        assert_eq!(mini_center_x(0, 1920, 1.5, 1.25), 360);
+        // Narrow monitor clamps to work area left edge instead of going off-screen
+        assert_eq!(mini_center_x(100, 500, 1.0, 1.0), 100);
+    }
+
+    #[test]
+    fn init_script_sets_theme_and_optional_solid_effect() {
+        let dark_mica = init_script(true, false);
+        assert!(dark_mica.contains("dataset.theme='dark'"));
+        assert!(!dark_mica.contains("dataset.effect='solid'"));
+
+        let light_solid = init_script(false, true);
+        assert!(light_solid.contains("dataset.theme='light'"));
+        assert!(light_solid.contains("dataset.effect='solid'"));
     }
 }

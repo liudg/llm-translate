@@ -4,27 +4,117 @@
    so a light/dark choice in settings overrides the system. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* ============================================================================
+   「素纸墨韵 · Editorial Paper & Precision Instrument」 Design Tokens
+   100% offline Windows-native typography stacks · Win11 Mica & Win10 Solid
+   ============================================================================ */
 :root {
   color-scheme: light;
-  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  --accent: #005fb8;
-  --accent-hover: #0a6cc4;
-  --accent-text: #005fb8;
-  --surface: rgb(255 255 255 / 0.6);
-  --surface-strong: rgb(255 255 255 / 0.85);
-  --stroke: rgb(0 0 0 / 0.07);
-  color: #1a1a1a;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --font-reading: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --font-reading-serif: "Sitka Text", Georgia, "STZhongsong", "Source Han Serif SC", "Songti SC", "Microsoft YaHei UI", serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+
+  /* Core warm paper palette */
+  --bg-canvas: #f4f1ea;
+  --bg-canvas-mica: rgb(244 241 234 / 0.89);
+  --bg-flyout-mica: rgb(252 251 248 / 0.94);
+  --bg-flyout-result: rgb(248 245 238 / 0.70);
+  --bg-surface: #fcfbf8;
+  --bg-surface-alt: #f8f5ee;
+  --bg-recessed: #ebe7dd;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgb(27 25 23 / 0.048);
+  --bg-active: rgb(27 25 23 / 0.088);
+
+  /* Ink hierarchy */
+  --ink: #1b1917;
+  --ink-secondary: #5e5a52;
+  --ink-muted: #726d63;
+  --ink-inverse: #fcfbf8;
+
+  /* Hairline borders */
+  --border: #e3ded3;
+  --border-subtle: rgb(27 25 23 / 0.068);
+  --border-strong: #ccc5b6;
+
+  /* Signature Vermilion Seal Accent (印泥朱砂) */
+  --accent: #b8431f;
+  --accent-hover: #9f3717;
+  --accent-text: #a63a19;
+  --accent-soft: rgb(184 67 31 / 0.10);
+  --accent-ring: rgb(184 67 31 / 0.30);
+
+  /* Semantic signals */
+  --good: #1f7a52;
+  --good-soft: rgb(31 122 82 / 0.11);
+  --warn: #a6680b;
+  --warn-soft: rgb(166 104 11 / 0.12);
+  --danger: #ba2638;
+  --danger-soft: rgb(186 38 56 / 0.10);
+
+  /* Legacy aliases kept for any utility consumers */
+  --surface: var(--bg-surface);
+  --surface-strong: var(--bg-elevated);
+  --stroke: var(--border);
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgb(27 25 23 / 0.06);
+  --shadow-card: 0 1px 3px rgb(27 25 23 / 0.04), 0 1px 1px rgb(27 25 23 / 0.03);
+  --shadow-popover: 0 12px 32px -6px rgb(27 25 23 / 0.16), 0 2px 6px rgb(27 25 23 / 0.06);
+
+  font-family: var(--font-ui);
+  font-feature-settings: "kern" 1, "liga" 1;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --accent: #60cdff;
-  --accent-hover: #4cc2ff;
-  --accent-text: #60cdff;
-  --surface: rgb(255 255 255 / 0.04);
-  --surface-strong: rgb(255 255 255 / 0.07);
-  --stroke: rgb(255 255 255 / 0.07);
-  color: #f3f3f3;
+
+  /* Core warm obsidian ink palette */
+  --bg-canvas: #121110;
+  --bg-canvas-mica: rgb(18 17 16 / 0.91);
+  --bg-flyout-mica: rgb(27 26 24 / 0.95);
+  --bg-flyout-result: rgb(31 30 27 / 0.76);
+  --bg-surface: #1b1a18;
+  --bg-surface-alt: #1f1e1b;
+  --bg-recessed: #0e0d0c;
+  --bg-elevated: #24221f;
+  --bg-hover: rgb(238 235 227 / 0.06);
+  --bg-active: rgb(238 235 227 / 0.11);
+
+  /* Ink hierarchy */
+  --ink: #eeebe3;
+  --ink-secondary: #9c978d;
+  --ink-muted: #8a847a;
+  --ink-inverse: #141311;
+
+  /* Hairline borders */
+  --border: #2c2a26;
+  --border-subtle: rgb(238 235 227 / 0.068);
+  --border-strong: #403d37;
+
+  /* Signature Warm Terracotta Seal Accent */
+  --accent: #e06d48;
+  --accent-hover: #eb7e5b;
+  --accent-text: #ed815e;
+  --accent-soft: rgb(224 109 72 / 0.15);
+  --accent-ring: rgb(224 109 72 / 0.36);
+
+  /* Semantic signals */
+  --good: #48bb84;
+  --good-soft: rgb(72 187 132 / 0.14);
+  --warn: #e0ae4b;
+  --warn-soft: rgb(224 174 75 / 0.14);
+  --danger: #ee6d7b;
+  --danger-soft: rgb(238 109 123 / 0.14);
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.36);
+  --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.045), 0 1px 3px rgb(0 0 0 / 0.30);
+  --shadow-popover: 0 16px 40px -6px rgb(0 0 0 / 0.68), 0 0 0 1px #36332e;
 }
 
 html,
@@ -32,47 +122,93 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  /* transparent so Win11 Mica shows through */
+  /* Transparent so Win11 Mica & Shot overlay margins show through */
   background: transparent;
   user-select: none;
 }
 
-/* Win10 solid Fluent fallback (set via initialization_script in windows.rs). */
+/* Win10 solid fallback (set via initialization_script in windows.rs for main/wizard/mini/popup). */
+:root[data-effect="solid"] {
+  --bg-flyout-result: var(--bg-surface-alt);
+}
 :root[data-effect="solid"],
 :root[data-effect="solid"] body,
 :root[data-effect="solid"] #root {
-  background: #f3f3f3;
+  background: var(--bg-canvas);
 }
 
-:root[data-effect="solid"][data-theme="dark"],
-:root[data-effect="solid"][data-theme="dark"] body,
-:root[data-effect="solid"][data-theme="dark"] #root {
-  background: #202020;
+/* Primary frameless window shell (main / wizard) */
+.app-shell {
+  background: var(--bg-canvas-mica);
+}
+:root[data-effect="solid"] .app-shell {
+  background: var(--bg-canvas);
 }
 
-/* Flyouts (mini / popup) size their window to the content; while a resize is
-   in flight the content may be briefly taller, which must not flash a page
-   scrollbar (it also narrows the layout and makes the text reflow). */
+/* Borderless flyouts (mini / popup) size their window to the content; while a resize is
+   in flight the content may be briefly taller, which must not flash a page scrollbar. */
 html:has(.flyout-frame),
 html:has(.flyout-frame) body {
   overflow: hidden;
 }
 
-/* Crisp 1px inner edge for borderless flyouts (mini / popup) on Win10. */
+.flyout-frame {
+  min-height: 100%;
+  background: var(--bg-flyout-mica);
+}
+.flyout-frame::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: inset 0 0 0 1px rgb(27 25 23 / 0.08);
+}
+:root[data-theme="dark"] .flyout-frame::after {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.09);
+}
 :root[data-effect="solid"] .flyout-frame {
-  box-shadow: inset 0 0 0 1px var(--stroke);
+  background: var(--bg-surface);
+}
+:root[data-effect="solid"] :is(.app-shell, .flyout-frame)::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+:root[data-maximized="true"] .app-shell::after {
+  display: none;
 }
 
-kbd {
-  font-family: inherit;
-}
-
+/* Text selection */
 textarea,
+input,
 .selectable {
   user-select: text;
 }
 
-/* Thin Fluent-like scrollbars. */
+::selection {
+  background: var(--accent-soft);
+  color: inherit;
+}
+
+/* Focus rings */
+:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+textarea:focus-visible,
+input:focus-visible {
+  outline: none;
+}
+
+kbd {
+  font-family: var(--font-mono);
+}
+
+/* Refined thin warm scrollbars */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -80,51 +216,174 @@ textarea,
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.25) padding-box;
+  background: rgb(27 25 23 / 0.18) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(27 25 23 / 0.32) padding-box;
 }
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb {
-  background-color: rgb(255 255 255 / 0.25);
+  background: rgb(238 235 227 / 0.16) padding-box;
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgb(238 235 227 / 0.30) padding-box;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-select option {
-  background: #fff;
-  color: #1a1a1a;
-}
-:root[data-theme="dark"] select option {
-  background: #2b2b2b;
-  color: #f3f3f3;
-}
-
+/* ============================================================================
+   Signature Motion — Living Ink Seam, Streaming Caret & Panel Transitions
+   ============================================================================ */
 @keyframes indeterminate {
   0% {
-    transform: translateX(-100%);
+    transform: translateX(-110%);
   }
   100% {
-    transform: translateX(300%);
+    transform: translateX(310%);
   }
 }
 
 .progress-indeterminate {
-  animation: indeterminate 1.4s ease-in-out infinite;
+  animation: indeterminate 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-@keyframes caret-blink {
+@keyframes caret-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
   50% {
-    opacity: 0;
+    opacity: 0.18;
   }
 }
 
-/* Streaming caret after the last character of a translation. */
 .stream-caret::after {
   content: "";
   display: inline-block;
   width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: -0.15em;
+  height: 1.05em;
+  margin-left: 2.5px;
+  vertical-align: -0.16em;
+  border-radius: 1px;
   background: var(--accent);
-  animation: caret-blink 1s step-end infinite;
+  animation: caret-pulse 0.88s ease-in-out infinite;
+}
+
+/* Living Ink Seam: glides a subtle luminous terracotta ink ribbon while translating */
+@keyframes seam-flow-x {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes seam-flow-y {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(260%);
+  }
+}
+
+.seam-beam-x {
+  position: relative;
+  overflow: hidden;
+  background: var(--border);
+}
+.seam-beam-x[data-active="true"] {
+  background: var(--accent-soft);
+}
+.seam-beam-x[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: seam-flow-x 1.35s cubic-bezier(0.3, 0, 0.2, 1) infinite;
+}
+
+.seam-beam-y {
+  position: relative;
+  overflow: hidden;
+  background: var(--border);
+}
+.seam-beam-y[data-active="true"] {
+  background: var(--accent-soft);
+}
+.seam-beam-y[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  height: 36%;
+  background: linear-gradient(180deg, transparent, var(--accent), transparent);
+  animation: seam-flow-y 1.45s cubic-bezier(0.3, 0, 0.2, 1) infinite;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-panel-in {
+  animation: panel-in 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-drawer-in {
+  animation: drawer-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes thinking-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.thinking-line {
+  background: linear-gradient(
+    90deg,
+    var(--bg-recessed) 25%,
+    var(--border) 50%,
+    var(--bg-recessed) 75%
+  );
+  background-size: 200% 100%;
+  animation: thinking-shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-indeterminate,
+  .stream-caret::after,
+  .seam-beam-x[data-active="true"]::after,
+  .seam-beam-y[data-active="true"]::after,
+  .animate-panel-in,
+  .animate-drawer-in,
+  .thinking-line {
+    animation: none;
+  }
+  .seam-beam-x[data-active="true"],
+  .seam-beam-y[data-active="true"] {
+    background: var(--accent);
+  }
 }

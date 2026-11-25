@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent};
 
 use app::commands::AppInfo;
 use app::hotkey::Hotkeys;
@@ -37,10 +37,15 @@ fn inference_status(state: State<'_, AppState>) -> Status {
 }
 
 #[tauri::command]
-async fn translate(state: State<'_, AppState>, req: TranslateRequest, on_event: Channel<TranslateEvent>) -> Result<(), ()> {
+async fn translate(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    req: TranslateRequest,
+    on_event: Channel<TranslateEvent>,
+) -> Result<(), ()> {
     let translator = state.translator.clone();
     translator
-        .translate(req, move |ev| {
+        .translate(window.label(), req, move |ev| {
             let _ = on_event.send(ev);
         })
         .await;
@@ -48,10 +53,15 @@ async fn translate(state: State<'_, AppState>, req: TranslateRequest, on_event: 
 }
 
 #[tauri::command]
-async fn translate_batch(state: State<'_, AppState>, req: BatchRequest, on_event: Channel<BatchEvent>) -> Result<(), ()> {
+async fn translate_batch(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    req: BatchRequest,
+    on_event: Channel<BatchEvent>,
+) -> Result<(), ()> {
     let translator = state.translator.clone();
     translator
-        .translate_batch(req, move |ev| {
+        .translate_batch(window.label(), req, move |ev| {
             let _ = on_event.send(ev);
         })
         .await;
@@ -59,8 +69,8 @@ async fn translate_batch(state: State<'_, AppState>, req: BatchRequest, on_event
 }
 
 #[tauri::command]
-fn translate_cancel(state: State<'_, AppState>) {
-    state.translator.cancel();
+fn translate_cancel(window: WebviewWindow, state: State<'_, AppState>) {
+    state.translator.cancel_for(window.label());
 }
 
 fn build_state(app: &AppHandle) -> anyhow::Result<AppState> {
@@ -252,6 +262,8 @@ pub fn run() {
                 // The mini window behaves like a flyout: it hides on focus loss.
                 WindowEvent::Focused(false) if window.label() == "mini" => {
                     let _ = window.hide();
+                    app.state::<AppState>().translator.cancel_for("mini");
+                    let _ = window.emit("mini-hidden", ());
                 }
                 // The selection popup closes on focus loss unless pinned.
                 WindowEvent::Focused(false)
@@ -263,6 +275,8 @@ pub fn run() {
                     "mini" => {
                         api.prevent_close();
                         let _ = window.hide();
+                        app.state::<AppState>().translator.cancel_for("mini");
+                        let _ = window.emit("mini-hidden", ());
                     }
                     popup::LABEL => {
                         api.prevent_close();
@@ -298,12 +312,14 @@ pub fn run() {
             translate_cancel,
             app::commands::app_info,
             app::commands::set_theme,
+            app::commands::sync_system_theme,
             app::commands::set_idle_release,
             app::commands::set_inference,
             app::commands::hardware_info,
             app::commands::open_logs_dir,
             app::commands::open_models_dir,
             app::commands::open_mini,
+            app::commands::open_main_with_text,
             app::commands::set_selection,
             app::commands::window_processes,
             app::popup::popup_set_height,

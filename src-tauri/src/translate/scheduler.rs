@@ -63,7 +63,7 @@ pub struct Translator {
     manifest: Arc<Manifest>,
     http: reqwest::Client,
     cache: Cache,
-    current: Mutex<CancellationToken>,
+    current: Mutex<(Option<String>, CancellationToken)>,
     serial: tokio::sync::Mutex<()>,
 }
 
@@ -80,22 +80,35 @@ impl Translator {
             manifest,
             http: local_client(),
             cache: Cache::new(500),
-            current: Mutex::new(CancellationToken::new()),
+            current: Mutex::new((None, CancellationToken::new())),
             serial: tokio::sync::Mutex::new(()),
         }
     }
 
-    /// Cancel whatever is running.
+    /// Cancel whatever is running, regardless of owner.
     pub fn cancel(&self) {
-        self.current.lock().unwrap().cancel();
+        let mut cur = self.current.lock().unwrap();
+        cur.0 = None;
+        cur.1.cancel();
     }
 
-    /// Cancel the running request and hand out the token for a new one.
-    fn begin(&self) -> CancellationToken {
+    /// Cancel the running request only if it belongs to `owner` (window label),
+    /// so a hiding flyout cannot interrupt a newer translation in another window.
+    pub fn cancel_for(&self, owner: &str) {
         let mut cur = self.current.lock().unwrap();
-        cur.cancel();
-        *cur = CancellationToken::new();
-        cur.clone()
+        if cur.0.as_deref() == Some(owner) {
+            cur.0 = None;
+            cur.1.cancel();
+        }
+    }
+
+    /// Cancel the running request and hand out the token for a new one owned by `owner`.
+    fn begin(&self, owner: &str) -> CancellationToken {
+        let mut cur = self.current.lock().unwrap();
+        cur.1.cancel();
+        let token = CancellationToken::new();
+        *cur = (Some(owner.to_string()), token.clone());
+        token
     }
 
     /// Wait for the previous request to wind down (it was just cancelled).
@@ -107,8 +120,8 @@ impl Translator {
     }
 
     /// Translate, streaming events to `sink`. Cancels any earlier request.
-    pub async fn translate(&self, req: TranslateRequest, sink: impl Fn(TranslateEvent) + Send + Sync) {
-        let token = self.begin();
+    pub async fn translate(&self, owner: &str, req: TranslateRequest, sink: impl Fn(TranslateEvent) + Send + Sync) {
+        let token = self.begin(owner);
         let event = match self.run(&req, &token, &sink).await {
             Ok(ev) => ev,
             Err(ChatError::Cancelled) => TranslateEvent::Cancelled,
@@ -119,8 +132,8 @@ impl Translator {
 
     /// Translate several texts in order. Cancels any earlier request; a later
     /// request cancels this whole batch.
-    pub async fn translate_batch(&self, req: BatchRequest, sink: impl Fn(BatchEvent) + Send + Sync) {
-        let token = self.begin();
+    pub async fn translate_batch(&self, owner: &str, req: BatchRequest, sink: impl Fn(BatchEvent) + Send + Sync) {
+        let token = self.begin(owner);
         let event = match self.run_batch(&req, &token, &sink).await {
             Ok(ev) => ev,
             Err(ChatError::Cancelled) => BatchEvent::Cancelled,
@@ -278,5 +291,42 @@ impl Translator {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_translator() -> Translator {
+        let sup = Supervisor::new(Arc::new(|_| {}));
+        let manifest = Arc::new(Manifest { version: 1, models: Vec::new() });
+        Translator::new(sup, manifest)
+    }
+
+    #[test]
+    fn cancel_for_only_cancels_matching_owner() {
+        let t = dummy_translator();
+        let popup_tok = t.begin("popup");
+        assert!(!popup_tok.is_cancelled());
+
+        // Main takes over: popup's token is cancelled immediately.
+        let main_tok = t.begin("main");
+        assert!(popup_tok.is_cancelled());
+        assert!(!main_tok.is_cancelled());
+
+        // Late cancel from hiding popup must NOT cancel main's active request.
+        t.cancel_for("popup");
+        assert!(!main_tok.is_cancelled());
+
+        // Matching owner cancels cleanly.
+        t.cancel_for("main");
+        assert!(main_tok.is_cancelled());
+
+        // Global cancel cancels regardless of owner.
+        let mini_tok = t.begin("mini");
+        assert!(!mini_tok.is_cancelled());
+        t.cancel();
+        assert!(mini_tok.is_cancelled());
     }
 }

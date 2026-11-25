@@ -182,6 +182,16 @@ export type TranslateEvent =
   | { type: "error"; message: string }
   | { type: "cancelled" };
 
+/** Structured handoff payload from Mini / Popup to the Main translate studio. */
+export interface OpenTranslatePayload {
+  text: string;
+  choice?: "auto" | Direction;
+  result?: string | null;
+  direction?: Direction | null;
+  mixed?: boolean;
+  elapsedMs?: number | null;
+}
+
 /** A new screenshot for the result window; sizes are physical pixels. */
 export interface ShotPayload {
   id: number;
@@ -239,6 +249,8 @@ export const api = {
   openLogsDir: () => invoke<void>("open_logs_dir"),
   openModelsDir: () => invoke<void>("open_models_dir"),
   openMini: () => invoke<void>("open_mini"),
+  openMainWithText: (payload: OpenTranslatePayload) => invoke<void>("open_main_with_text", { payload }),
+  syncSystemTheme: () => invoke<void>("sync_system_theme"),
   appInfo: () => invoke<AppInfo>("app_info"),
   updateStatus: () => invoke<UpdateSnapshot>("update_status"),
   updateCheck: () => invoke<UpdateSnapshot>("update_check"),
@@ -291,11 +303,15 @@ export const events = {
   selection: (cb: (p: SelectionPayload) => void) =>
     listen<SelectionPayload>("selection-captured", (e) => cb(e.payload)),
   popupHidden: (cb: () => void) => listen("popup-hidden", () => cb()),
+  miniHidden: (cb: () => void) => listen("mini-hidden", () => cb()),
   shotNew: (cb: (p: ShotPayload) => void) => listen<ShotPayload>("shot-new", (e) => cb(e.payload)),
   shotHidden: (cb: () => void) => listen("shot-hidden", () => cb()),
   hotkeys: (cb: (h: HotkeyInfo[]) => void) => listen<HotkeyInfo[]>("hotkeys-changed", (e) => cb(e.payload)),
   /** Tray "settings": the main window switches page. */
   navigate: (cb: (page: string) => void) => listen<string>("navigate", (e) => cb(e.payload)),
+  /** Mini / Popup handoff: populate and translate text in the main window. */
+  openTranslate: (cb: (p: OpenTranslatePayload) => void) =>
+    listen<OpenTranslatePayload>("open-translate", (e) => cb(e.payload)),
   updateState: (cb: (s: UpdateSnapshot) => void) => listen<UpdateSnapshot>("update-state", (e) => cb(e.payload)),
 };
 

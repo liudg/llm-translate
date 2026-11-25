@@ -1,8 +1,23 @@
-// Settings (DESIGN 5.8): general (theme, start with Windows), shortcuts
-// (recorded), selection translation, models (management, backend / threads /
-// idle release), about.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Download, FolderOpen, Plus, RefreshCw, X } from "lucide-react";
+// Settings (DESIGN 5.8): categorized editorial settings with visual theme cards,
+// custom dropdowns, searchable process picker, model cards and tactile hotkey recorders.
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  Cpu,
+  Download,
+  FolderOpen,
+  Info,
+  Keyboard,
+  MousePointerClick,
+  Palette,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import {
   api,
   errorText,
@@ -14,23 +29,47 @@ import {
   type WindowProcess,
 } from "../../lib/api";
 import { mbToGb } from "../../lib/format";
-import { Badge, Button, Progress, Segmented, Select, Spinner, Toggle } from "../../components/ui";
+import { useCopy } from "../../lib/useCopy";
+import { isImeComposing } from "../../lib/useTranslator";
+import {
+  Badge,
+  BrandSeal,
+  Button,
+  Card,
+  CustomSelect,
+  Progress,
+  Spinner,
+  Toggle,
+  type SelectOption,
+} from "../../components/ui";
+import { StatusChip } from "../../components/status";
 import { useSettings } from "../../stores/settings";
 import { downloadProgress, useUpdater } from "../../stores/updater";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { ModelList } from "./ModelList";
+
+export type SettingsSection = "general" | "hotkeys" | "selection" | "models" | "about";
+
 const IDLE_CHOICES = [0, 5, 10, 30, 60];
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+const NAV_ITEMS: { id: SettingsSection; label: string; icon: typeof Palette }[] = [
+  { id: "general", label: "常规与外观", icon: Palette },
+  { id: "hotkeys", label: "全局快捷键", icon: Keyboard },
+  { id: "selection", label: "划词翻译", icon: MousePointerClick },
+  { id: "models", label: "模型与推理", icon: Cpu },
+  { id: "about", label: "关于与更新", icon: Info },
+];
+
+function SectionHeader({ title, desc }: { title: string; desc: string }) {
   return (
-    <section className="flex flex-col gap-1">
-      <h2 className="mb-1 text-sm font-semibold">{title}</h2>
-      {children}
-    </section>
+    <div className="mb-4">
+      <h2 className="text-base font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
+      <p className="mt-0.5 text-xs text-[var(--ink-secondary)]">{desc}</p>
+    </div>
   );
 }
 
-function Row({
+function SettingRow({
   title,
   desc,
   children,
@@ -42,13 +81,118 @@ function Row({
   muted?: boolean;
 }) {
   return (
-    <div className="flex min-h-[60px] flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)] px-4 py-3">
-      <div className={`min-w-0 flex-1 ${muted ? "opacity-55" : ""}`}>
-        <div className="text-sm">{title}</div>
-        {desc && <div className="mt-0.5 text-xs opacity-65">{desc}</div>}
+    <div className="flex min-h-[64px] flex-wrap items-center gap-x-4 gap-y-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 shadow-[var(--shadow-card)]">
+      <div className={`min-w-0 flex-1 ${muted ? "opacity-50" : ""}`}>
+        <div className="text-[13.5px] font-medium text-[var(--ink)]">{title}</div>
+        {desc && <div className="mt-0.5 text-xs leading-relaxed text-[var(--ink-secondary)]">{desc}</div>}
       </div>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
+      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
     </div>
+  );
+}
+
+/** Visual miniature theme preview cards (System / Light Paper / Dark Obsidian). */
+function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) => void }) {
+  const choices: {
+    id: Theme;
+    label: string;
+    sub: string;
+    preview: ReactNode;
+  }[] = [
+    {
+      id: "system",
+      label: "跟随系统",
+      sub: "自动同步 Windows 深浅色",
+      preview: (
+        <div className="relative flex h-12 w-full overflow-hidden rounded-lg border border-[var(--border)]">
+          <div className="flex flex-1 flex-col gap-1 bg-[#f4f1ea] p-2">
+            <div className="h-1.5 w-6 rounded-full bg-[#b8431f]" />
+            <div className="h-1.5 w-10 rounded-full bg-[#1b1917]/20" />
+            <div className="h-1.5 w-7 rounded-full bg-[#1b1917]/12" />
+          </div>
+          <div className="flex flex-1 flex-col gap-1 bg-[#121110] p-2">
+            <div className="h-1.5 w-6 rounded-full bg-[#e06d48]" />
+            <div className="h-1.5 w-10 rounded-full bg-[#eeebe3]/25" />
+            <div className="h-1.5 w-7 rounded-full bg-[#eeebe3]/14" />
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "light",
+      label: "宣纸浅色",
+      sub: "温润素笺，日间清晰耐读",
+      preview: (
+        <div className="flex h-12 w-full flex-col gap-1.5 rounded-lg border border-[#e3ded3] bg-[#f4f1ea] p-2">
+          <div className="flex items-center gap-1.5">
+            <div className="size-2.5 rounded-[3px] bg-[#b8431f]" />
+            <div className="h-1.5 w-12 rounded-full bg-[#1b1917]/25" />
+          </div>
+          <div className="flex flex-1 gap-1.5">
+            <div className="flex-1 rounded bg-[#fcfbf8] border border-[#e3ded3]" />
+            <div className="flex-1 rounded bg-[#f8f5ee] border border-[#e3ded3]" />
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "dark",
+      label: "墨砚深色",
+      sub: "深炭暖墨，夜间柔和护眼",
+      preview: (
+        <div className="flex h-12 w-full flex-col gap-1.5 rounded-lg border border-[#2c2a26] bg-[#121110] p-2">
+          <div className="flex items-center gap-1.5">
+            <div className="size-2.5 rounded-[3px] bg-[#e06d48]" />
+            <div className="h-1.5 w-12 rounded-full bg-[#eeebe3]/30" />
+          </div>
+          <div className="flex flex-1 gap-1.5">
+            <div className="flex-1 rounded bg-[#1b1a18] border border-[#2c2a26]" />
+            <div className="flex-1 rounded bg-[#161513] border border-[#2c2a26]" />
+          </div>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <div className="text-[13.5px] font-medium text-[var(--ink)]">外观主题</div>
+          <div className="mt-0.5 text-xs text-[var(--ink-secondary)]">所有窗口实时同步切换</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+        {choices.map((c) => {
+          const active = value === c.id;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onChange(c.id)}
+              className={`flex cursor-pointer flex-col gap-2 rounded-xl border p-2.5 text-left transition-all ${
+                active
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)] ring-1 ring-[var(--accent)]/30"
+                  : "border-[var(--border)] bg-[var(--bg-surface-alt)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
+              }`}
+            >
+              {c.preview}
+              <div className="flex items-center justify-between px-0.5">
+                <span className={`text-xs font-semibold ${active ? "text-[var(--accent-text)]" : "text-[var(--ink)]"}`}>
+                  {c.label}
+                </span>
+                {active && (
+                  <span className="inline-flex size-4 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--ink-inverse)]">
+                    <Check className="size-2.5" />
+                  </span>
+                )}
+              </div>
+              <div className="px-0.5 text-[11px] text-[var(--ink-muted)]">{c.sub}</div>
+            </button>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
@@ -59,7 +203,7 @@ function backendKey(backend: "cpu" | "vulkan", device: string | null): BackendKe
   return backend === "cpu" ? "cpu" : `vulkan:${device ?? ""}`;
 }
 
-function ModelGroup() {
+function ModelSection() {
   const settings = useSettings((s) => s.settings);
   const [hw, setHw] = useState<HardwareInfo | null>(null);
   const [switching, setSwitching] = useState(false);
@@ -73,18 +217,70 @@ function ModelGroup() {
     api.hardware().then(setHw).catch((e) => setError(errorText(e)));
   }, []);
 
-  if (!settings) return null;
-  const savedKey = backendKey(settings.backend, settings.device);
+  const savedKey = settings ? backendKey(settings.backend, settings.device) : "cpu";
   const curKey = key ?? savedKey;
-  const curThreads = threads ?? settings.threads;
+  const curThreads = threads ?? settings?.threads ?? 4;
+  const maxThreads = hw?.cpu.logicalCores ?? Math.max(settings?.threads ?? 4, 16);
+
+  const backendOptions = useMemo<SelectOption<BackendKey>[]>(() => {
+    const list: SelectOption<BackendKey>[] = [
+      {
+        value: "cpu",
+        label: "CPU 推理",
+        desc: hw ? `${hw.cpu.name}（${hw.cpu.physicalCores} 核）` : "通用兼容模式",
+      },
+    ];
+    if (savedKey === "vulkan:") {
+      list.push({ value: "vulkan:", label: "GPU · 自动选择", desc: "由 llama.cpp 自动挑选 Vulkan 设备" });
+    }
+    if (hw) {
+      for (const g of hw.gpus) {
+        list.push({
+          value: `vulkan:${g.id}`,
+          label: `GPU · ${g.name}`,
+          desc: `显存 ${mbToGb(g.totalMb)}${g.freeMb > 0 ? `（可用 ${mbToGb(g.freeMb)}）` : ""}`,
+          badge: g.integrated ? "核显" : "Vulkan",
+        });
+      }
+    }
+    if (
+      savedKey.startsWith("vulkan:") &&
+      savedKey !== "vulkan:" &&
+      !hw?.gpus.some((g) => `vulkan:${g.id}` === savedKey)
+    ) {
+      list.push({ value: savedKey, label: `GPU · ${settings?.device ?? ""}`, badge: "已保存" });
+    }
+    return list;
+  }, [hw, savedKey, settings?.device]);
+
+  const threadOptions = useMemo<SelectOption<number>[]>(
+    () =>
+      Array.from({ length: maxThreads }, (_, i) => i + 1).map((n) => ({
+        value: n,
+        label: `${n} 线程`,
+        badge: hw && n === hw.cpu.physicalCores ? "推荐" : undefined,
+      })),
+    [hw, maxThreads],
+  );
+
+  const idleOptions = useMemo<SelectOption<number>[]>(
+    () =>
+      IDLE_CHOICES.map((m) => ({
+        value: m,
+        label: m === 0 ? "从不释放（常驻内存）" : `闲置 ${m} 分钟后释放`,
+      })),
+    [],
+  );
+
+  if (!settings) return null;
   const dirty = curKey !== savedKey || (curKey === "cpu" && curThreads !== settings.threads);
-  const maxThreads = hw?.cpu.logicalCores ?? Math.max(settings.threads, 16);
 
   const apply = async () => {
     setApplying(true);
     setError(null);
     try {
-      const [backend, device] = curKey === "cpu" ? (["cpu", null] as const) : (["vulkan", curKey.slice(7) || null] as const);
+      const [backend, device] =
+        curKey === "cpu" ? (["cpu", null] as const) : (["vulkan", curKey.slice(7) || null] as const);
       await api.setInference(backend, device, curThreads);
       setKey(null);
       setThreads(null);
@@ -96,105 +292,127 @@ function ModelGroup() {
   };
 
   return (
-    <Group title="模型">
+    <div className="flex flex-col gap-4">
+      <SectionHeader
+        title="模型与推理"
+        desc="所有翻译均在本地 GGUF 模型上运行，支持多档位随时切换与断点续传下载"
+      />
+
       <ModelList onBusy={onBusy} />
 
-      <Row
-        title="模型目录"
-        desc={
-          <span className="selectable block truncate" title={settings.modelsDir}>
-            {settings.modelsDir}
-          </span>
-        }
-      >
-        <Button icon={<FolderOpen className="size-4" />} onClick={() => api.openModelsDir()}>
-          打开目录
-        </Button>
-        <Button icon={<RefreshCw className="size-4" />} disabled={switching} onClick={() => api.openWizard()}>
-          重新部署
-        </Button>
-      </Row>
-
-      <Row
-        title="推理后端"
-        desc={
-          hw === null
-            ? "正在检测显卡…"
-            : hw.gpus.length === 0
-              ? `未检测到可用的 Vulkan 显卡${hw.listDevicesError ? `（${hw.listDevicesError}）` : ""}`
-              : "切换后会重新加载模型；GPU 多次失败会自动退回 CPU"
-        }
-      >
-        {hw === null && <Spinner className="opacity-60" />}
-        <Select value={curKey} onChange={(e) => setKey(e.target.value)} className="max-w-[420px]">
-          <option value="cpu">CPU</option>
-          {savedKey === "vulkan:" && <option value="vulkan:">GPU（自动选择）</option>}
-          {hw?.gpus.map((g) => (
-            <option key={g.id} value={`vulkan:${g.id}`}>
-              GPU · {g.name}（{g.integrated ? "核显，" : ""}显存 {mbToGb(g.totalMb)}）
-            </option>
-          ))}
-          {/* Saved device not in the list (driver change, detection still running). */}
-          {savedKey.startsWith("vulkan:") &&
-            savedKey !== "vulkan:" &&
-            !hw?.gpus.some((g) => `vulkan:${g.id}` === savedKey) && (
-              <option value={savedKey}>GPU · {settings.device}</option>
-            )}
-        </Select>
-      </Row>
-
-      {curKey === "cpu" && (
-        <Row
-          title="CPU 线程数"
-          desc={hw ? `本机 ${hw.cpu.physicalCores} 个物理核心、${hw.cpu.logicalCores} 个逻辑核心；通常设为物理核心数最快` : undefined}
+      <div className="mt-1 flex flex-col gap-2.5">
+        <SettingRow
+          title={
+            <span className="flex flex-wrap items-center gap-2.5">
+              <span>推理后端</span>
+              <StatusChip />
+            </span>
+          }
+          desc={
+            hw === null
+              ? "正在检测本机显卡与 Vulkan 设备…"
+              : hw.gpus.length === 0
+                ? `未检测到可用的 Vulkan 显卡${hw.listDevicesError ? `（${hw.listDevicesError}）` : ""}`
+                : "切换后端后将重新加载模型；若 GPU 多次失败会自动退回 CPU"
+          }
         >
-          <Select value={curThreads} onChange={(e) => setThreads(Number(e.target.value))}>
-            {Array.from({ length: maxThreads }, (_, i) => i + 1).map((n) => (
-              <option key={n} value={n}>
-                {n}
-                {hw && n === hw.cpu.physicalCores ? "（推荐）" : ""}
-              </option>
-            ))}
-          </Select>
-        </Row>
-      )}
+          {hw === null && <Spinner className="size-3.5 text-[var(--ink-muted)]" />}
+          <CustomSelect
+            value={curKey}
+            options={backendOptions}
+            onChange={setKey}
+            className="w-[260px]"
+            menuClassName="w-[320px]"
+          />
+        </SettingRow>
 
-      {(dirty || error) && (
-        <div className="flex items-center justify-end gap-2 py-1">
-          {error && <span className="mr-auto text-xs text-red-600 dark:text-red-400">{error}</span>}
-          {dirty && (
-            <>
-              <Button
-                onClick={() => {
-                  setKey(null);
-                  setThreads(null);
-                }}
-              >
-                取消
-              </Button>
-              <Button variant="primary" disabled={applying || switching} onClick={apply}>
-                {applying ? <Spinner /> : null}
-                应用并重新加载模型
-              </Button>
-            </>
-          )}
-        </div>
-      )}
+        {curKey === "cpu" && (
+          <SettingRow
+            title="CPU 线程数"
+            desc={
+              hw
+                ? `本机 ${hw.cpu.physicalCores} 个物理核心 / ${hw.cpu.logicalCores} 个逻辑核心，通常设为物理核心数速度最快`
+                : "设置 CPU 推理使用的线程数量"
+            }
+          >
+            <CustomSelect
+              value={curThreads}
+              options={threadOptions}
+              onChange={setThreads}
+              className="w-[150px]"
+            />
+          </SettingRow>
+        )}
 
-      <Row title="闲置释放模型" desc="闲置一段时间后关闭推理进程以释放内存 / 显存，下次翻译时自动重新加载（需几秒）">
-        <Select value={settings.idleReleaseMinutes} onChange={(e) => api.setIdleRelease(Number(e.target.value))}>
-          {IDLE_CHOICES.map((m) => (
-            <option key={m} value={m}>
-              {m === 0 ? "从不" : `${m} 分钟`}
-            </option>
-          ))}
-        </Select>
-      </Row>
-    </Group>
+        {(dirty || error) && (
+          <div className="animate-panel-in flex flex-wrap items-center gap-2 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-4 py-2.5">
+            {error ? (
+              <span className="mr-auto text-xs text-[var(--danger)]">{error}</span>
+            ) : (
+              <span className="mr-auto text-xs font-medium text-[var(--accent-text)]">
+                推理配置已更改，应用后将重启本地推理进程
+              </span>
+            )}
+            {dirty && (
+              <>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  onClick={() => {
+                    setKey(null);
+                    setThreads(null);
+                  }}
+                >
+                  放弃更改
+                </Button>
+                <Button size="sm" variant="primary" disabled={applying || switching} onClick={apply}>
+                  {applying && <Spinner className="size-3.5" />}
+                  应用并重新加载
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
+        <SettingRow
+          title="闲置自动释放"
+          desc="长时间未翻译时自动关闭推理进程以释放显存 / 内存，下次翻译时自动冷启动"
+        >
+          <CustomSelect
+            value={settings.idleReleaseMinutes}
+            options={idleOptions}
+            onChange={(m) => api.setIdleRelease(m)}
+            className="w-[200px]"
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="模型存储目录"
+          desc={
+            <span className="selectable block truncate font-mono text-[11.5px]" title={settings.modelsDir}>
+              {settings.modelsDir}
+            </span>
+          }
+        >
+          <Button size="sm" icon={<FolderOpen className="size-3.5" />} onClick={() => api.openModelsDir()}>
+            打开目录
+          </Button>
+          <Button
+            size="sm"
+            variant="subtle"
+            icon={<RefreshCw className="size-3.5" />}
+            disabled={switching}
+            onClick={() => api.openWizard()}
+          >
+            重新部署
+          </Button>
+        </SettingRow>
+      </div>
+    </div>
   );
 }
 
-function SelectionGroup() {
+function SelectionSection() {
   const settings = useSettings((s) => s.settings);
   const [manual, setManual] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -220,40 +438,75 @@ function SelectionGroup() {
   };
   const off = !sel.enabled;
   const triggers: { key: "drag" | "doubleClick" | "shiftClick"; title: string; desc: string }[] = [
-    { key: "drag", title: "拖动选择", desc: "按住左键拖过文字后松开" },
-    { key: "doubleClick", title: "双击选词", desc: "双击（三击选段落同样有效）" },
-    { key: "shiftClick", title: "Shift + 单击", desc: "按住 Shift 单击扩展选区" },
+    { key: "drag", title: "拖动选择", desc: "按住左键拖选文字后松开触发" },
+    { key: "doubleClick", title: "双击选词", desc: "双击选词（三击选段同样触发）" },
+    { key: "shiftClick", title: "Shift + 单击", desc: "按住 Shift 单击扩展选区时触发" },
   ];
 
   return (
-    <Group title="划词翻译">
-      <Row title="划词翻译" desc="选中文字后在光标旁显示图标，点击图标才取词并翻译；不会发送 Ctrl+C，终端里也安全">
-        <Toggle checked={sel.enabled} onChange={(v) => save({ enabled: v })} />
-      </Row>
-      {triggers.map((t) => (
-        <Row key={t.key} title={t.title} desc={t.desc} muted={off}>
-          <Toggle checked={sel[t.key]} disabled={off} onChange={(v) => save({ [t.key]: v })} />
-        </Row>
-      ))}
-      <div
-        className={`flex flex-col gap-3 rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)] px-4 py-3 ${off ? "opacity-55" : ""}`}
+    <div className="flex flex-col gap-4">
+      <SectionHeader
+        title="划词翻译"
+        desc="在任意应用选中文字后于光标旁弹出「译」图标，点击后即时流式翻译"
+      />
+
+      <SettingRow
+        title="启用划词翻译"
+        desc="关闭后系统托盘图标将变为灰色；支持通过全局快捷键一键开关"
       >
-        <div>
-          <div className="text-sm">黑名单</div>
-          <div className="mt-0.5 text-xs opacity-65">在这些程序里选中文字时不显示图标（按进程名匹配）</div>
+        <Toggle checked={sel.enabled} onChange={(v) => save({ enabled: v })} />
+      </SettingRow>
+
+      {/* Terminal safety note */}
+      <div className="flex items-center gap-2.5 rounded-xl border border-[var(--good)]/20 bg-[var(--good-soft)] px-3.5 py-2.5 text-xs text-[var(--good)]">
+        <ShieldCheck className="size-4 shrink-0" />
+        <span>优先通过 Windows UIA 读取选区，兜底仅用 Ctrl+Insert，绝不发送 Ctrl+C，终端内使用绝对安全。</span>
+      </div>
+
+      {/* Trigger gesture cards */}
+      <div className={`grid grid-cols-1 gap-2.5 sm:grid-cols-3 ${off ? "opacity-50" : ""}`}>
+        {triggers.map((t) => (
+          <div
+            key={t.key}
+            className="flex flex-col justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3.5 shadow-[var(--shadow-card)]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="text-[13px] font-medium text-[var(--ink)]">{t.title}</div>
+              <Toggle checked={sel[t.key]} disabled={off} onChange={(v) => save({ [t.key]: v })} />
+            </div>
+            <div className="text-[11.5px] leading-relaxed text-[var(--ink-secondary)]">{t.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Blacklist manager */}
+      <Card className={`flex flex-col gap-3.5 p-4 ${off ? "opacity-50" : ""}`}>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2 text-[13.5px] font-medium text-[var(--ink)]">
+              <span>应用黑名单</span>
+              <Badge>{sel.blacklist.length}</Badge>
+            </div>
+            <div className="mt-0.5 text-xs text-[var(--ink-secondary)]">
+              在这些进程中选中文字时不会显示划词图标（按进程名忽略大小写匹配）
+            </div>
+          </div>
         </div>
+
         {sel.blacklist.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {sel.blacklist.map((b) => (
               <span
                 key={b}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--stroke)] bg-[var(--surface)] pr-1 pl-2.5 text-xs"
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] pr-1 pl-2.5 font-mono text-[11.5px] text-[var(--ink)]"
               >
                 {b}
                 <button
-                  title="移除"
+                  type="button"
+                  disabled={off}
+                  title="移出黑名单"
                   onClick={() => save({ blacklist: sel.blacklist.filter((x) => x !== b) })}
-                  className="inline-flex size-5 items-center justify-center rounded hover:bg-black/5 dark:hover:bg-white/10"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-[var(--ink-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)] disabled:pointer-events-none"
                 >
                   <X className="size-3" />
                 </button>
@@ -261,8 +514,11 @@ function SelectionGroup() {
             ))}
           </div>
         ) : (
-          <div className="text-xs opacity-50">暂无</div>
+          <div className="rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5 text-xs text-[var(--ink-muted)]">
+            暂无屏蔽程序
+          </div>
         )}
+
         <div className="flex flex-wrap items-center gap-2">
           <ProcessPicker disabled={off} isAdded={has} onPick={add} onError={setError} />
           <input
@@ -272,19 +528,20 @@ function SelectionGroup() {
             onKeyDown={(e) => e.key === "Enter" && addManual()}
             placeholder="或输入进程名，如 notepad.exe"
             spellCheck={false}
-            className="h-8 min-w-0 flex-1 rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)] px-2 text-sm outline-none focus:border-[var(--accent)]"
+            className="h-8 min-w-[180px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] px-2.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-muted)] focus:border-[var(--accent)] focus:bg-[var(--bg-elevated)] focus:ring-2 focus:ring-[var(--accent-ring)]"
           />
-          <Button icon={<Plus className="size-4" />} disabled={off || !manual.trim()} onClick={addManual}>
+          <Button size="sm" icon={<Plus className="size-3.5" />} disabled={off || !manual.trim()} onClick={addManual}>
             添加
           </Button>
         </div>
-        {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
-      </div>
-    </Group>
+
+        {error && <div className="text-xs text-[var(--danger)]">{error}</div>}
+      </Card>
+    </div>
   );
 }
 
-/** Button that lists processes with a visible window, fetched when opened. */
+/** Searchable popover listing currently running desktop apps. */
 function ProcessPicker({
   disabled,
   isAdded,
@@ -297,27 +554,45 @@ function ProcessPicker({
   onError: (e: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const [procs, setProcs] = useState<WindowProcess[] | null>(null);
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isImeComposing(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+        ref.current?.querySelector("button")?.focus();
+      }
+    };
     window.addEventListener("mousedown", close);
-    window.addEventListener("keydown", esc);
+    window.addEventListener("keydown", esc, true);
     return () => {
       window.removeEventListener("mousedown", close);
-      window.removeEventListener("keydown", esc);
+      window.removeEventListener("keydown", esc, true);
     };
   }, [open]);
 
   const toggle = () => {
     if (open) return setOpen(false);
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top - 46;
+      setDropUp(spaceBelow < 300 && spaceAbove > spaceBelow);
+    }
     setProcs(null);
+    setQuery("");
     setOpen(true);
+    window.setTimeout(() => searchRef.current?.focus(), 40);
     api
       .windowProcesses()
       .then(setProcs)
@@ -327,48 +602,92 @@ function ProcessPicker({
       });
   };
 
+  const filtered = useMemo(() => {
+    if (!procs) return null;
+    const q = query.trim().toLowerCase();
+    if (!q) return procs;
+    return procs.filter(
+      (p) => p.exe.toLowerCase().includes(q) || p.title.toLowerCase().includes(q),
+    );
+  }, [procs, query]);
+
   return (
     <div ref={ref} className="relative">
-      <Button disabled={disabled} onClick={toggle} className="w-56 justify-between">
-        <span>从正在运行的程序中选择</span>
-        <ChevronDown className="size-4 opacity-70" />
+      <Button size="sm" disabled={disabled} onClick={toggle} className="w-[210px] justify-between">
+        <span>从运行中的程序选择</span>
+        <ChevronDown className={`size-3.5 text-[var(--ink-muted)] transition-transform ${open ? "rotate-180" : ""}`} />
       </Button>
+
       {open && (
-        <div className="absolute top-full left-0 z-20 mt-1 max-h-72 w-96 overflow-y-auto rounded-lg border border-[var(--stroke)] bg-white p-1 shadow-lg dark:bg-[#2b2b2b]">
-          {procs === null && (
-            <div className="flex items-center gap-2 px-3 py-2 text-xs opacity-60">
-              <Spinner className="size-3.5" />
-              正在读取…
-            </div>
-          )}
-          {procs?.length === 0 && <div className="px-3 py-2 text-xs opacity-60">没有找到有窗口的程序</div>}
-          {procs?.map((p) => {
-            const added = isAdded(p.exe);
-            return (
-              <button
-                key={p.exe}
-                disabled={added}
-                onClick={() => {
-                  onPick(p.exe);
-                  setOpen(false);
-                }}
-                className="flex w-full flex-col items-start rounded-md px-3 py-1.5 text-left hover:bg-black/5 disabled:opacity-40 dark:hover:bg-white/10"
-              >
-                <span className="text-sm">
-                  {p.exe}
-                  {added && <span className="ml-2 text-xs opacity-70">已添加</span>}
-                </span>
-                <span className="w-full truncate text-xs opacity-60">{p.title}</span>
-              </button>
-            );
-          })}
+        <div
+          className={`animate-panel-in absolute left-0 z-30 flex w-[340px] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-popover)] ${
+            dropUp ? "bottom-full mb-1.5" : "top-full mt-1.5"
+          }`}
+        >
+          <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
+            <Search className="size-3.5 shrink-0 text-[var(--ink-muted)]" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="筛选进程名或窗口标题…"
+              className="min-w-0 flex-1 bg-transparent text-xs text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
+            />
+          </div>
+
+          <div className="max-h-60 overflow-y-auto p-1">
+            {filtered === null && (
+              <div className="flex items-center gap-2 px-3 py-3 text-xs text-[var(--ink-muted)]">
+                <Spinner className="size-3.5" />
+                正在读取活动窗口…
+              </div>
+            )}
+            {filtered?.length === 0 && (
+              <div className="px-3 py-3 text-xs text-[var(--ink-muted)]">没有匹配的可见窗口程序</div>
+            )}
+            {filtered?.map((p) => {
+              const added = isAdded(p.exe);
+              return (
+                <button
+                  key={p.exe}
+                  type="button"
+                  disabled={added}
+                  onClick={() => {
+                    onPick(p.exe);
+                    setOpen(false);
+                  }}
+                  className="flex w-full cursor-pointer flex-col items-start rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <div className="flex w-full items-center gap-2">
+                    <span className="font-mono text-xs font-medium text-[var(--ink)]">{p.exe}</span>
+                    {added && <Badge tone="neutral">已添加</Badge>}
+                  </div>
+                  <span className="mt-0.5 w-full truncate text-[11px] text-[var(--ink-muted)]">{p.title}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function AboutVersionRow({ info }: { info: AppInfo | null }) {
+function PathCopyButton({ path }: { path: string }) {
+  const { copied, copy } = useCopy();
+  return (
+    <Button
+      size="sm"
+      variant="subtle"
+      icon={copied ? <Check className="size-3.5 text-[var(--good)]" /> : <Copy className="size-3.5" />}
+      onClick={() => copy(path)}
+    >
+      {copied ? "已复制" : "复制路径"}
+    </Button>
+  );
+}
+
+function AboutSection({ info }: { info: AppInfo | null }) {
   const snapshot = useUpdater((s) => s.snapshot);
   const check = useUpdater((s) => s.check);
   const install = useUpdater((s) => s.install);
@@ -382,12 +701,12 @@ function AboutVersionRow({ info }: { info: AppInfo | null }) {
 
   let statusHint: ReactNode = null;
   if (snapshot.phase === "upToDate" && snapshot.manual) {
-    statusHint = <span className="text-green-700 dark:text-green-400">已是最新版本</span>;
+    statusHint = <span className="font-medium text-[var(--good)]">已是最新版本</span>;
   } else if (snapshot.phase === "error" && snapshot.error) {
-    statusHint = <span className="text-red-600 dark:text-red-400">{snapshot.error}</span>;
+    statusHint = <span className="text-[var(--danger)]">{snapshot.error}</span>;
   } else if (downloading) {
     statusHint = (
-      <span>
+      <span className="tabular-nums">
         正在下载 v{avail?.version}… {progressText}
       </span>
     );
@@ -396,94 +715,149 @@ function AboutVersionRow({ info }: { info: AppInfo | null }) {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-[var(--stroke)] bg-[var(--surface-strong)] px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-sm">
-            <span>LLM Translate {info?.version ?? ""}</span>
-            {avail && <Badge tone="accent">新版本 v{avail.version}</Badge>}
+    <div className="flex flex-col gap-4">
+      <SectionHeader
+        title="关于与更新"
+        desc="纯本地离线中英互译桌面工具，数据与翻译记录均留在你的电脑上"
+      />
+
+      {/* Brand Identity & Updater Hero Card */}
+      <Card className="flex flex-col gap-3.5 p-5">
+        <div className="flex flex-wrap items-center gap-4">
+          <BrandSeal size="lg" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold text-[var(--ink)]">LLM Translate</h3>
+              {info && <Badge tone="neutral">v{info.version}</Badge>}
+              {avail && <Badge tone="accent">新版本 v{avail.version}</Badge>}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-[var(--ink-secondary)]">
+              {info && <span>Windows build {info.osBuild} · 窗口材质 {info.effect}</span>}
+              {statusHint && (
+                <>
+                  {info && <span>·</span>}
+                  {statusHint}
+                </>
+              )}
+            </div>
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs opacity-65">
-            {info && <span>Windows build {info.osBuild} · 窗口效果 {info.effect}</span>}
-            {statusHint && (
+
+          <div className="flex shrink-0 items-center gap-2">
+            {avail ? (
               <>
-                {info && <span>·</span>}
-                <span className="opacity-100">{statusHint}</span>
+                {!downloading && !installing && (
+                  <Button size="sm" variant="subtle" icon={<RefreshCw className="size-3.5" />} onClick={check}>
+                    重新检查
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={downloading || installing ? <Spinner className="size-3.5" /> : <Download className="size-3.5" />}
+                  disabled={downloading || installing}
+                  onClick={install}
+                >
+                  {downloading
+                    ? "下载中…"
+                    : installing
+                      ? "安装中…"
+                      : snapshot.phase === "error"
+                        ? "重试更新"
+                        : `更新到 v${avail.version}`}
+                </Button>
               </>
+            ) : (
+              <Button
+                size="sm"
+                icon={checking ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}
+                disabled={checking}
+                onClick={check}
+              >
+                {checking ? "正在检查…" : "检查更新"}
+              </Button>
             )}
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          {avail ? (
-            <>
-              {!downloading && !installing && (
-                <Button variant="subtle" icon={<RefreshCw className="size-4" />} onClick={check}>
-                  重新检查
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                icon={downloading || installing ? <Spinner /> : <Download className="size-4" />}
-                disabled={downloading || installing}
-                onClick={install}
-              >
-                {downloading
-                  ? "下载中…"
-                  : installing
-                    ? "安装中…"
-                    : snapshot.phase === "error"
-                      ? "重试更新"
-                      : `更新到 v${avail.version}`}
-              </Button>
-            </>
-          ) : (
-            <Button icon={checking ? <Spinner /> : <RefreshCw className="size-4" />} disabled={checking} onClick={check}>
-              {checking ? "正在检查…" : "检查更新"}
-            </Button>
-          )}
-        </div>
-      </div>
+        {downloading && <Progress value={ratio} indeterminate={!prog?.total} />}
+        {installing && <Progress value={1} indeterminate />}
 
-      {downloading && <Progress value={ratio} indeterminate={!prog?.total} />}
-      {installing && <Progress value={1} indeterminate />}
-
-      {avail && (avail.notes || avail.pubDate) && (
-        <div className="rounded-md border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-xs">
-          <div className="mb-1 flex items-center justify-between opacity-70">
-            <span className="font-medium">v{avail.version} 更新内容</span>
-            {avail.pubDate && <span>{avail.pubDate}</span>}
-          </div>
-          {avail.notes && (
-            <div className="selectable max-h-40 overflow-y-auto leading-relaxed whitespace-pre-wrap opacity-85">
-              {avail.notes}
+        {avail && (avail.notes || avail.pubDate) && (
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-3.5 py-2.5 text-xs">
+            <div className="mb-1 flex items-center justify-between text-[var(--ink-secondary)]">
+              <span className="font-medium text-[var(--ink)]">v{avail.version} 更新内容</span>
+              {avail.pubDate && <span className="tabular-nums">{avail.pubDate}</span>}
             </div>
-          )}
-        </div>
-      )}
+            {avail.notes && (
+              <div className="selectable max-h-40 overflow-y-auto leading-relaxed whitespace-pre-wrap text-[var(--ink-secondary)]">
+                {avail.notes}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <div className="flex flex-col gap-2.5">
+        <SettingRow
+          title="配置文件位置"
+          desc={
+            <span className="selectable block truncate font-mono text-[11.5px]" title={info?.configDir}>
+              {info ? `${info.configDir}\\settings.json` : ""}
+            </span>
+          }
+        >
+          {info && <PathCopyButton path={`${info.configDir}\\settings.json`} />}
+        </SettingRow>
+
+        <SettingRow
+          title="运行日志目录"
+          desc={
+            <span className="selectable block truncate font-mono text-[11.5px]" title={info?.logsDir}>
+              {info?.logsDir}
+            </span>
+          }
+        >
+          <Button size="sm" icon={<FolderOpen className="size-3.5" />} onClick={() => api.openLogsDir()}>
+            打开日志目录
+          </Button>
+        </SettingRow>
+      </div>
     </div>
   );
 }
 
-export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo[]; visible: boolean }) {
+export default function SettingsPage({
+  hotkeys,
+  visible,
+  section,
+  onSectionChange,
+}: {
+  hotkeys: HotkeyInfo[];
+  visible: boolean;
+  section: SettingsSection;
+  onSectionChange: (s: SettingsSection) => void;
+}) {
   const settings = useSettings((s) => s.settings);
+  const update = useUpdater((s) => s.snapshot);
   const [info, setInfo] = useState<AppInfo | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const [modelsMounted, setModelsMounted] = useState(false);
 
   useEffect(() => {
     api.appInfo().then(setInfo);
   }, []);
-  // Hardware detection runs llama-server; only start it once the page is opened.
+
+  // Only trigger hardware detection once the Models section is actually visited.
   useEffect(() => {
-    if (visible) setMounted(true);
-  }, [visible]);
+    if (visible && section === "models") setModelsMounted(true);
+  }, [visible, section]);
 
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [autostartError, setAutostartError] = useState<string | null>(null);
-  // Re-read on every visit: it can also be turned off in Task Manager.
+
   useEffect(() => {
     if (visible) api.autostart().then(setAutostart);
   }, [visible]);
+
   const toggleAutostart = async (on: boolean) => {
     setAutostartError(null);
     try {
@@ -495,71 +869,125 @@ export default function SettingsPage({ hotkeys, visible }: { hotkeys: HotkeyInfo
   };
 
   const hk = (id: HotkeyInfo["id"]) => hotkeys.find((h) => h.id === id);
+  const hasFailedHotkeys = hotkeys.some((h) => h.keys && !h.registered);
+  const hasUpdate = !!update.available && settings?.ignoredUpdateVersion !== update.available.version;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex max-w-3xl flex-col gap-6 p-5 pb-10">
-        <h1 className="text-lg font-semibold">设置</h1>
+    <div className="flex min-h-0 flex-1 flex-col min-[720px]:flex-row">
+      {/* Category Sidebar (horizontal pill bar on narrow viewports) */}
+      <aside className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] px-3 py-2.5 min-[720px]:w-[186px] min-[720px]:flex-col min-[720px]:border-r min-[720px]:border-b-0 min-[720px]:px-3 min-[720px]:py-4">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const active = section === item.id;
+          const dotTone =
+            item.id === "hotkeys" && hasFailedHotkeys
+              ? "bg-[var(--warn)]"
+              : item.id === "about" && hasUpdate
+                ? "bg-[var(--accent)]"
+                : null;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onSectionChange(item.id)}
+              className={`relative flex shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] whitespace-nowrap transition-colors ${
+                active
+                  ? "bg-[var(--bg-surface)] font-semibold text-[var(--ink)] shadow-[var(--shadow-xs)]"
+                  : "text-[var(--ink-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+              }`}
+            >
+              {active && (
+                <span className="hidden min-[720px]:block absolute top-1/2 left-0 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--accent)]" />
+              )}
+              <Icon className={`size-4 shrink-0 ${active ? "text-[var(--accent-text)]" : "opacity-75"}`} />
+              <span className="flex-1 text-left">{item.label}</span>
+              {dotTone && <span className={`size-1.5 shrink-0 rounded-full ${dotTone}`} />}
+            </button>
+          );
+        })}
+      </aside>
 
-        <Group title="常规">
-          <Row title="主题" desc="浅色 / 深色，或跟随 Windows 设置">
-            <Segmented<Theme>
-              value={settings?.theme ?? "system"}
-              onChange={(t) => api.setTheme(t)}
-              options={[
-                { value: "system", label: "跟随系统" },
-                { value: "light", label: "浅色" },
-                { value: "dark", label: "深色" },
-              ]}
-            />
-          </Row>
-          <Row
-            title="开机自启"
-            desc={autostartError ?? "登录 Windows 后自动启动并驻留在系统托盘，不打开主窗口"}
-          >
-            <Toggle checked={autostart ?? false} disabled={autostart === null} onChange={toggleAutostart} />
-          </Row>
-        </Group>
+      {/* Active Category Panel */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 pb-10">
+        <div className="mx-auto max-w-[660px]">
+          {section === "general" && (
+            <div className="flex flex-col gap-4">
+              <SectionHeader
+                title="常规与外观"
+                desc="定制界面主题风格与 Windows 系统启动行为"
+              />
+              <ThemePicker value={settings?.theme ?? "system"} onChange={(t) => api.setTheme(t)} />
+              <SettingRow
+                title="开机自动启动"
+                desc={
+                  autostartError ? (
+                    <span className="text-[var(--danger)]">{autostartError}</span>
+                  ) : (
+                    "登录 Windows 后静默驻留系统托盘并预热模型，不弹出主窗口"
+                  )
+                }
+              >
+                <Toggle checked={autostart ?? false} disabled={autostart === null} onChange={toggleAutostart} />
+              </SettingRow>
+            </div>
+          )}
 
-        <Group title="快捷键">
-          <Row title="输入翻译（迷你窗）" desc={hk("mini")?.error ?? "在任意位置按下即可呼出迷你翻译窗"}>
-            <HotkeyRecorder id="mini" info={hk("mini")} visible={visible} />
-          </Row>
-          <Row title="截图翻译" desc={hk("shot")?.error ?? "框选屏幕区域，译文覆盖在原文位置"}>
-            <HotkeyRecorder id="shot" info={hk("shot")} visible={visible} />
-          </Row>
-          <Row title="划词翻译开关" desc={hk("selection")?.error ?? "打开 / 关闭划词翻译；关闭时托盘图标变灰"}>
-            <HotkeyRecorder id="selection" info={hk("selection")} visible={visible} />
-          </Row>
-        </Group>
+          {section === "hotkeys" && (
+            <div className="flex flex-col gap-3">
+              <SectionHeader
+                title="全局快捷键"
+                desc="点击右侧键帽框即可录制新组合，支持在任意桌面应用中全局呼出"
+              />
+              <SettingRow
+                title="迷你翻译窗"
+                desc={
+                  hk("mini")?.error ? (
+                    <span className="text-[var(--warn)]">{hk("mini")?.error}</span>
+                  ) : (
+                    "在任意位置快速呼出悬浮输入翻译条，再次按下即隐藏"
+                  )
+                }
+              >
+                <HotkeyRecorder id="mini" info={hk("mini")} visible={visible && section === "hotkeys"} />
+              </SettingRow>
+              <SettingRow
+                title="截图翻译"
+                desc={
+                  hk("shot")?.error ? (
+                    <span className="text-[var(--warn)]">{hk("shot")?.error}</span>
+                  ) : (
+                    "冻结屏幕并框选区域，离线 OCR 识别后将译文原位覆盖"
+                  )
+                }
+              >
+                <HotkeyRecorder id="shot" info={hk("shot")} visible={visible && section === "hotkeys"} />
+              </SettingRow>
+              <SettingRow
+                title="划词翻译开关"
+                desc={
+                  hk("selection")?.error ? (
+                    <span className="text-[var(--warn)]">{hk("selection")?.error}</span>
+                  ) : (
+                    "快速开启或暂停划词翻译，关闭时系统托盘图标变为灰色"
+                  )
+                }
+              >
+                <HotkeyRecorder id="selection" info={hk("selection")} visible={visible && section === "hotkeys"} />
+              </SettingRow>
+            </div>
+          )}
 
-        <SelectionGroup />
+          {section === "selection" && <SelectionSection />}
 
-        {mounted && <ModelGroup />}
+          {/* Keep ModelSection mounted once visited so active downloads & hardware info survive tab switching. */}
+          {modelsMounted && (
+            <div className={section === "models" ? "block" : "hidden"}>
+              <ModelSection />
+            </div>
+          )}
 
-        <Group title="关于">
-          <AboutVersionRow info={info} />
-          <Row
-            title="设置文件"
-            desc={
-              <span className="selectable" title={info?.configDir}>
-                {info ? `${info.configDir}\\settings.json` : ""}
-              </span>
-            }
-          />
-          <Row
-            title="日志"
-            desc={
-              <span className="selectable" title={info?.logsDir}>
-                {info?.logsDir}
-              </span>
-            }
-          >
-            <Button icon={<FolderOpen className="size-4" />} onClick={() => api.openLogsDir()}>
-              打开日志目录
-            </Button>
-          </Row>
-        </Group>
+          {section === "about" && <AboutSection info={info} />}
+        </div>
       </div>
     </div>
   );
