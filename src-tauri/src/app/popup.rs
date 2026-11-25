@@ -152,6 +152,7 @@ pub fn hide(app: &AppHandle) {
         // The page clears itself on `popup-hidden` and reports its smaller
         // height, so the next capture does not open at the old result's size.
         app.state::<PopupState>().0.lock().unwrap().pinned = false;
+        app.state::<AppState>().tts.stop_for(app, LABEL);
         let _ = win.hide();
         let _ = app.emit_to(LABEL, "popup-hidden", ());
     }

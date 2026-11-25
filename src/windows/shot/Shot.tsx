@@ -6,15 +6,17 @@ import { Check, Copy, FileText, GripVertical, ImageIcon, X } from "lucide-react"
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, errorText, events, type ShotParagraph, type ShotPayload } from "../../lib/api";
 import { useCopy } from "../../lib/useCopy";
+import { useTts } from "../../lib/useTts";
 import { IconButton, Spinner } from "../../components/ui";
+import { SpeakButton } from "../../components/tts";
 import { startInferenceSync, useInference } from "../../stores/inference";
 import { drawParagraph } from "./render";
 
 /** Toolbar strip in DIPs: 4 px gap + 40 px bar (matches TOOLBAR_HEIGHT = 44 in capture/mod.rs). */
 const BAR_GAP = 4;
 const BAR_HEIGHT = 40;
-const BAR_MIN_WIDTH = 360;
-const BAR_MAX_WIDTH = 520;
+const BAR_MIN_WIDTH = 392;
+const BAR_MAX_WIDTH = 552;
 
 type Phase = "ocr" | "translating" | "done" | "error" | "cancelled";
 
@@ -34,6 +36,8 @@ export default function Shot() {
   const textCopy = useCopy();
   const sourceCopy = useCopy();
   const imageCopy = useCopy();
+  const tts = useTts();
+  const { stop: ttsStop, stopLocal: ttsStopLocal } = tts;
   const status = useInference((s) => s.status);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
@@ -68,6 +72,7 @@ export default function Shot() {
       if (p.id <= seen.current) return;
       seen.current = p.id;
       active.current = p.id;
+      ttsStop();
       const stale = () => active.current !== p.id;
       scaleRef.current = p.scale;
       setShot(p);
@@ -150,7 +155,7 @@ export default function Shot() {
       }
       translating.current = false;
     },
-    [draw],
+    [draw, ttsStop],
   );
 
   useEffect(() => {
@@ -158,6 +163,7 @@ export default function Shot() {
     api.shotCurrent().then((p) => p && load(p));
     const unNew = events.shotNew(load);
     const unHidden = events.shotHidden(() => {
+      ttsStopLocal();
       if (translating.current) api.cancelTranslate();
       translating.current = false;
       active.current = 0;
@@ -170,7 +176,7 @@ export default function Shot() {
       unNew.then((f) => f());
       unHidden.then((f) => f());
     };
-  }, [load]);
+  }, [load, ttsStopLocal]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => draw(paras, showOriginal));
@@ -200,8 +206,8 @@ export default function Shot() {
     if (e.detail > 0) e.currentTarget.blur();
   };
 
-  const keyRef = useRef({ copyTranslation, copyImage, close: () => api.shotClose() });
-  keyRef.current = { copyTranslation, copyImage, close: () => api.shotClose() };
+  const keyRef = useRef({ copyTranslation, copyImage, close: () => { ttsStop(); api.shotClose(); } });
+  keyRef.current = { copyTranslation, copyImage, close: () => { ttsStop(); api.shotClose(); } };
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
@@ -252,7 +258,9 @@ export default function Shot() {
   let busy = false;
   let progressRatio = 0;
 
-  if (phase === "ocr") {
+  if (tts.error) {
+    statusText = <span className="text-[var(--danger)]">{tts.error}</span>;
+  } else if (phase === "ocr") {
     busy = true;
     statusText = "正在识别文字…";
   } else if (phase === "translating") {
@@ -306,6 +314,9 @@ export default function Shot() {
   };
 
   const hasTranslations = translations.length > 0;
+  const speakText = showOriginal ? sources.join("\n") : translations.join("\n");
+  const speakKey = showOriginal ? "shot:source" : "shot:result";
+  const canSpeak = showOriginal ? sources.length > 0 : hasTranslations && !busy;
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -321,7 +332,7 @@ export default function Shot() {
       {/* Floating Precision Editorial HUD Bar */}
       <div
         data-tauri-drag-region
-        className="absolute flex w-max min-w-[360px] max-w-[520px] items-center gap-1 overflow-hidden rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-surface)]/96 px-1.5 text-xs text-[var(--ink)] shadow-[0_8px_22px_rgb(0_0_0/0.22)]"
+        className="absolute flex w-max min-w-[392px] max-w-[552px] items-center gap-1 overflow-hidden rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-surface)]/96 px-1.5 text-xs text-[var(--ink)] shadow-[0_8px_22px_rgb(0_0_0/0.22)]"
         style={barStyle}
       >
         {/* Subtle drag handle & live status */}
@@ -343,7 +354,7 @@ export default function Shot() {
           <span
             data-tauri-drag-region
             className="truncate text-[12px] font-medium text-[var(--ink-secondary)] tabular-nums"
-            title={typeof statusText === "string" ? statusText : (error ?? "")}
+            title={typeof statusText === "string" ? statusText : (tts.error ?? error ?? "")}
           >
             {statusText}
           </span>
@@ -390,6 +401,22 @@ export default function Shot() {
 
         <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--border)]" />
 
+        {/* Smart read-aloud: reads translation when viewing translation, source when viewing original */}
+        <SpeakButton
+          size="sm"
+          phase={tts.phase}
+          disabled={!canSpeak}
+          title={showOriginal ? "朗读识别原文" : "朗读全部译文"}
+          onClick={(e) => {
+            blurOnMouseClick(e);
+            if (tts.phase !== "idle") {
+              ttsStop();
+            } else if (speakText.trim()) {
+              tts.play(speakKey, speakText);
+            }
+          }}
+        />
+
         {/* Grouped copy & close actions */}
         <IconButton
           size="sm"
@@ -431,6 +458,7 @@ export default function Shot() {
           title="关闭（Esc）"
           onClick={(e) => {
             blurOnMouseClick(e);
+            ttsStop();
             api.shotClose();
           }}
         >

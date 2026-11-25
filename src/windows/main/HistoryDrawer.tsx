@@ -4,7 +4,9 @@ import { Check, Clock, Copy, FileText, Search, Trash2, X } from "lucide-react";
 import { useHistory, type HistoryItem, type HistoryOrigin } from "../../stores/history";
 import { useCopy } from "../../lib/useCopy";
 import { isImeComposing } from "../../lib/useTranslator";
+import { useTts } from "../../lib/useTts";
 import { Badge, Button, IconButton } from "../../components/ui";
+import { SpeakButton } from "../../components/tts";
 
 const ORIGIN_LABEL: Partial<Record<HistoryOrigin, string>> = {
   mini: "迷你窗",
@@ -64,8 +66,15 @@ function HistoryCard({
 }) {
   const { copied: copiedResult, copy: copyResult } = useCopy();
   const { copied: copiedSource, copy: copySource } = useCopy();
+  const tts = useTts();
   const dirLabel = item.mixed ? "中英混合" : item.direction === "zh2En" ? "中 → 英" : "英 → 中";
   const originLabel = item.origin ? ORIGIN_LABEL[item.origin] : undefined;
+  const srcKey = `history:${item.id}:source`;
+  const resKey = `history:${item.id}:result`;
+  const srcPhase = tts.phaseOf(srcKey);
+  const resPhase = tts.phaseOf(resKey);
+  const srcLang = item.mixed ? null : item.direction === "zh2En" ? "zh" : "en";
+  const resLang = item.mixed ? null : item.direction === "zh2En" ? "en" : "zh";
 
   return (
     <div
@@ -123,12 +132,43 @@ function HistoryCard({
         </div>
       </div>
 
-      <p className="line-clamp-2 text-xs leading-relaxed text-[var(--ink-secondary)]">
-        <HighlightText text={item.source} query={query} />
-      </p>
-      <p className="line-clamp-2 text-[13px] leading-relaxed font-medium text-[var(--ink)]">
-        <HighlightText text={item.result} query={query} />
-      </p>
+      <div className="flex items-start gap-1.5">
+        <p className="line-clamp-2 min-w-0 flex-1 text-xs leading-relaxed text-[var(--ink-secondary)]">
+          <HighlightText text={item.source} query={query} />
+        </p>
+        <div
+          className={`shrink-0 transition-opacity ${
+            srcPhase !== "idle" ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <SpeakButton
+            size="xs"
+            phase={srcPhase}
+            title="朗读原文"
+            onClick={() => tts.toggle(srcKey, item.source, { lang: srcLang })}
+          />
+        </div>
+      </div>
+
+      <div className="flex items-start gap-1.5">
+        <p className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-relaxed font-medium text-[var(--ink)]">
+          <HighlightText text={item.result} query={query} />
+        </p>
+        <div
+          className={`shrink-0 transition-opacity ${
+            resPhase !== "idle" ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <SpeakButton
+            size="xs"
+            phase={resPhase}
+            title="朗读译文"
+            onClick={() => tts.toggle(resKey, item.result, { lang: resLang })}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -145,6 +185,8 @@ export function HistoryDrawer({
   const items = useHistory((s) => s.items);
   const remove = useHistory((s) => s.remove);
   const clear = useHistory((s) => s.clear);
+  const tts = useTts();
+  const stopHistoryTts = tts.stopIfKeyPrefix;
   const [query, setQuery] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -152,11 +194,12 @@ export function HistoryDrawer({
   useEffect(() => {
     if (!open) {
       setConfirmClear(false);
+      stopHistoryTts("history:");
       return;
     }
     const id = window.setTimeout(() => searchRef.current?.focus(), 40);
     return () => window.clearTimeout(id);
-  }, [open]);
+  }, [open, stopHistoryTts]);
 
   // Three-tier Escape handling: confirmClear -> clear query -> close drawer.
   useEffect(() => {
@@ -259,6 +302,11 @@ export function HistoryDrawer({
               </button>
             )}
           </div>
+          {tts.error && tts.errorKey?.startsWith("history:") && (
+            <div className="mt-2 truncate rounded-lg border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-2.5 py-1.5 text-[11.5px] text-[var(--danger)]">
+              {tts.error}
+            </div>
+          )}
         </div>
 
         {/* List */}

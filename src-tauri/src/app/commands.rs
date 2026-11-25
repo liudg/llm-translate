@@ -173,6 +173,41 @@ pub fn set_selection(state: State<'_, AppState>, patch: SelectionPatch) -> Resul
     })
 }
 
+/// Partial update for TTS settings.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsPatch {
+    pub zh_voice: Option<String>,
+    pub en_voice: Option<String>,
+    pub rate: Option<f32>,
+    pub popup_auto_speak: Option<bool>,
+}
+
+#[tauri::command]
+pub fn set_tts(state: State<'_, AppState>, patch: TtsPatch) -> Result<(), String> {
+    use crate::tts::voices::{TtsLang, is_valid_voice};
+    state.settings.save(|s| {
+        if let Some(v) = patch.zh_voice
+            && is_valid_voice(&v, TtsLang::Zh)
+        {
+            s.tts.zh_voice = v;
+        }
+        if let Some(v) = patch.en_voice
+            && is_valid_voice(&v, TtsLang::En)
+        {
+            s.tts.en_voice = v;
+        }
+        if let Some(r) = patch.rate
+            && r.is_finite()
+        {
+            s.tts.rate = r.clamp(0.5, 2.0);
+        }
+        if let Some(auto) = patch.popup_auto_speak {
+            s.tts.popup_auto_speak = auto;
+        }
+    })
+}
+
 /// Start with Windows (HKCU Run, `--minimized`). Read from the registry each
 /// time, so turning it off in Task Manager shows up here too.
 #[tauri::command]

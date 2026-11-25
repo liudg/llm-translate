@@ -27,7 +27,7 @@ use overlay::Overlay;
 pub const LABEL: &str = "shot";
 /// Toolbar strip height and minimum width in DIPs (must match Shot.tsx).
 const TOOLBAR_HEIGHT: f64 = 44.0;
-const TOOLBAR_MIN_WIDTH: f64 = 360.0;
+const TOOLBAR_MIN_WIDTH: f64 = 392.0;
 /// Closes the overlay if the page never reports that it has drawn.
 const OVERLAY_FALLBACK: Duration = Duration::from_secs(3);
 
@@ -244,6 +244,7 @@ pub fn hide(app: &AppHandle) -> bool {
     if visible {
         let _ = win.hide();
     }
+    app.state::<crate::state::AppState>().tts.stop_for(app, LABEL);
     *app.state::<CaptureState>().current.lock().unwrap() = None;
     let _ = app.emit_to(LABEL, "shot-hidden", ());
     visible

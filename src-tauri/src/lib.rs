@@ -5,6 +5,7 @@ pub mod inference;
 pub mod selection;
 pub mod state;
 pub mod translate;
+pub mod tts;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -96,12 +97,14 @@ fn build_state(app: &AppHandle) -> anyhow::Result<AppState> {
     }));
     sup.set_idle_minutes(settings.get().idle_release_minutes);
     let translator = Arc::new(Translator::new(sup.clone(), manifest.clone()));
+    let tts = Arc::new(tts::TtsService::new());
     Ok(AppState {
         settings,
         manifest,
         llama_exe,
         sup,
         translator,
+        tts,
         downloads: Mutex::new(HashMap::new()),
         http: deploy::downloader::client(),
         deploy: tokio::sync::Mutex::new(()),
@@ -276,7 +279,9 @@ pub fn run() {
                 // The mini window behaves like a flyout: it hides on focus loss.
                 WindowEvent::Focused(false) if window.label() == "mini" => {
                     let _ = window.hide();
-                    app.state::<AppState>().translator.cancel_for("mini");
+                    let state = app.state::<AppState>();
+                    state.translator.cancel_for("mini");
+                    state.tts.stop_for(app, "mini");
                     let _ = window.emit("mini-hidden", ());
                 }
                 // The selection popup closes on focus loss unless pinned.
@@ -289,7 +294,9 @@ pub fn run() {
                     "mini" => {
                         api.prevent_close();
                         let _ = window.hide();
-                        app.state::<AppState>().translator.cancel_for("mini");
+                        let state = app.state::<AppState>();
+                        state.translator.cancel_for("mini");
+                        state.tts.stop_for(app, "mini");
                         let _ = window.emit("mini-hidden", ());
                     }
                     popup::LABEL => {
@@ -303,6 +310,7 @@ pub fn run() {
                     // The main window hides to the tray; quit from the tray menu.
                     "main" => {
                         api.prevent_close();
+                        app.state::<AppState>().tts.stop_for(app, "main");
                         windows::save_main_placement(app);
                         let _ = window.hide();
                         tray_hint_once(app);
@@ -335,7 +343,11 @@ pub fn run() {
             app::commands::open_mini,
             app::commands::open_main_with_text,
             app::commands::set_selection,
+            app::commands::set_tts,
             app::commands::window_processes,
+            tts::tts_synthesize,
+            tts::tts_stop,
+            tts::tts_voices,
             app::popup::popup_set_height,
             app::popup::popup_set_pinned,
             app::popup::popup_close,

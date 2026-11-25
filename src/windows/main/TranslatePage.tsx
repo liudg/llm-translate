@@ -14,13 +14,15 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { type HotkeyInfo, type OpenTranslatePayload } from "../../lib/api";
+import { type HotkeyInfo, type OpenTranslatePayload, type TtsLang } from "../../lib/api";
 import { useCopy } from "../../lib/useCopy";
 import { useStreamAutoScroll } from "../../lib/useStreamAutoScroll";
 import { DIR_LABEL, footerText, isImeComposing, useTranslator, type DirChoice } from "../../lib/useTranslator";
+import { useTts } from "../../lib/useTts";
 import { useHistory, type HistoryItem } from "../../stores/history";
 import { useSettings } from "../../stores/settings";
 import { Button, IconButton, Kbd, Segmented } from "../../components/ui";
+import { SpeakButton } from "../../components/tts";
 import { TranslationBody } from "../../components/translation";
 import { HistoryDrawer } from "./HistoryDrawer";
 
@@ -48,6 +50,8 @@ export default function TranslatePage({
   const [composing, setComposing] = useState(false);
 
   const { state, run, stop, clear, hydrate } = useTranslator();
+  const tts = useTts();
+  const stopMainTts = tts.stopIfKeyPrefix;
   const { copied, copy } = useCopy();
   const { copied: copiedBilingual, copy: copyBilingual } = useCopy();
   const settings = useSettings((s) => s.settings);
@@ -217,10 +221,11 @@ export default function TranslatePage({
 
   const clearAll = useCallback(() => {
     window.clearTimeout(timer.current);
+    stopMainTts("main:");
     setSource("");
     clear();
     inputRef.current?.focus();
-  }, [clear]);
+  }, [clear, stopMainTts]);
 
   // Focus textarea when page becomes visible and drawer is closed.
   useEffect(() => {
@@ -301,6 +306,26 @@ export default function TranslatePage({
 
   const canSwap = Boolean(state.result.trim()) && !state.busy;
   const canCopyBilingual = Boolean(state.result.trim()) && Boolean((state.source || source).trim());
+  const sourceLang: TtsLang | null =
+    choice === "zh2En"
+      ? "zh"
+      : choice === "en2Zh"
+        ? "en"
+        : !state.mixed && state.direction === "zh2En"
+          ? "zh"
+          : !state.mixed && state.direction === "en2Zh"
+            ? "en"
+            : null;
+  const targetLang: TtsLang | null =
+    choice === "zh2En"
+      ? "en"
+      : choice === "en2Zh"
+        ? "zh"
+        : !state.mixed && state.direction === "zh2En"
+          ? "en"
+          : !state.mixed && state.direction === "en2Zh"
+            ? "zh"
+            : null;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col gap-3 px-4 pt-3 pb-4">
@@ -347,6 +372,13 @@ export default function TranslatePage({
             <span className="text-[11px] font-semibold tracking-wide text-[var(--ink-muted)]">原文</span>
             <span className="text-[11px] text-[var(--ink-secondary)]">· {sourceLangLabel}</span>
             <div className="ml-auto flex items-center gap-1">
+              <SpeakButton
+                size="xs"
+                phase={tts.phaseOf("main:source")}
+                disabled={!source.trim()}
+                title="朗读原文"
+                onClick={() => tts.toggle("main:source", source, { lang: sourceLang })}
+              />
               <button
                 type="button"
                 onClick={pasteClipboard}
@@ -430,15 +462,21 @@ export default function TranslatePage({
           </div>
 
           {/* Source micro-footer */}
-          <div className="flex h-10 shrink-0 items-center justify-between border-t border-[var(--border-subtle)] px-4 text-xs">
-            <span
-              className={`tabular-nums ${
-                nearLimit ? "font-medium text-[var(--warn)]" : "text-[var(--ink-muted)]"
-              }`}
-            >
-              {source.length.toLocaleString()} / {MAX_CHARS.toLocaleString()} 字
-              {paragraphCount > 1 && <span className="ml-1.5 opacity-80">· {paragraphCount} 段</span>}
-            </span>
+          <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-4 text-xs">
+            {tts.error && tts.errorKey === "main:source" ? (
+              <span className="min-w-0 flex-1 truncate text-[var(--danger)]" title={tts.error}>
+                {tts.error}
+              </span>
+            ) : (
+              <span
+                className={`tabular-nums ${
+                  nearLimit ? "font-medium text-[var(--warn)]" : "text-[var(--ink-muted)]"
+                }`}
+              >
+                {source.length.toLocaleString()} / {MAX_CHARS.toLocaleString()} 字
+                {paragraphCount > 1 && <span className="ml-1.5 opacity-80">· {paragraphCount} 段</span>}
+              </span>
+            )}
 
             {source.trim() && (
               <button
@@ -521,11 +559,25 @@ export default function TranslatePage({
 
           {/* Translation micro-footer */}
           <div className="flex h-10 shrink-0 items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 text-xs">
-            <span className="min-w-0 flex-1 truncate px-1 text-[var(--ink-muted)] tabular-nums">
-              {footerText(state)}
-            </span>
+            {tts.error && tts.errorKey === "main:result" ? (
+              <span className="min-w-0 flex-1 truncate px-1 text-[var(--danger)]" title={tts.error}>
+                {tts.error}
+              </span>
+            ) : (
+              <span className="min-w-0 flex-1 truncate px-1 text-[var(--ink-muted)] tabular-nums">
+                {footerText(state)}
+              </span>
+            )}
 
             <div className="flex shrink-0 items-center gap-1">
+              <SpeakButton
+                size="sm"
+                phase={tts.phaseOf("main:result")}
+                disabled={!state.result.trim() || state.busy}
+                title="朗读译文"
+                onClick={() => tts.toggle("main:result", state.result, { lang: targetLang })}
+              />
+
               {state.busy ? (
                 <Button variant="secondary" size="sm" icon={<Square className="size-3" />} onClick={stop}>
                   停止

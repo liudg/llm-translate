@@ -13,15 +13,18 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { api, events, type OpenTranslatePayload, type SelectionPayload } from "../../lib/api";
+import { api, events, type OpenTranslatePayload, type SelectionPayload, type TtsLang } from "../../lib/api";
 import { NEXT_CHOICE, footerText, isImeComposing, useTranslator, type DirChoice } from "../../lib/useTranslator";
 import { useAutoHeight } from "../../lib/useAutoHeight";
 import { useCopy } from "../../lib/useCopy";
 import { useStreamAutoScroll } from "../../lib/useStreamAutoScroll";
+import { useTts } from "../../lib/useTts";
 import { BrandSeal, Button, IconButton } from "../../components/ui";
+import { SpeakButton } from "../../components/tts";
 import { CopyResultButton, DirCycleButton, TranslationBody } from "../../components/translation";
 import { useHistory } from "../../stores/history";
 import { startInferenceSync } from "../../stores/inference";
+import { useSettings } from "../../stores/settings";
 
 export default function Popup() {
   const [payload, setPayload] = useState<SelectionPayload | null>(null);
@@ -29,6 +32,8 @@ export default function Popup() {
   const [pinned, setPinned] = useState(false);
   const [choice, setChoice] = useState<DirChoice>("auto");
   const { state, run, stop, clear, drop } = useTranslator();
+  const tts = useTts();
+  const { play: ttsPlay, stop: ttsStop, stopLocal: ttsStopLocal } = tts;
   const sourceCopy = useCopy();
   const rootRef = useRef<HTMLDivElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -57,15 +62,36 @@ export default function Popup() {
       if (p.id <= seen.current) return;
       seen.current = p.id;
       handedOffRef.current = false;
+      ttsStop();
       setPayload(p);
       setExpanded(false);
       setChoice("auto");
-      if (p.text) run(p.text, "auto");
-      else clearRef.current();
+      if (p.text) {
+        const text = p.text;
+        run(text, "auto");
+        const loaded = useSettings.getState().settings;
+        if (loaded) {
+          if (loaded.tts.popupAutoSpeak && text.trim()) {
+            ttsPlay("popup:source", text);
+          }
+        } else if (text.trim()) {
+          api
+            .getSettings()
+            .then((s) => {
+              if (seen.current === p.id && s.tts.popupAutoSpeak) {
+                ttsPlay("popup:source", text);
+              }
+            })
+            .catch(() => {});
+        }
+      } else {
+        clearRef.current();
+      }
     };
     api.popupCurrent().then((p) => p && accept(p));
     const unSel = events.selection(accept);
     const unHide = events.popupHidden(() => {
+      ttsStopLocal();
       setPinned(false);
       setPayload(null);
       setExpanded(false);
@@ -94,7 +120,7 @@ export default function Popup() {
       unHide.then((f) => f());
       window.removeEventListener("keydown", onKey);
     };
-  }, [run]);
+  }, [run, ttsPlay, ttsStop, ttsStopLocal]);
 
   // Record finished clean translations into shared local history.
   useEffect(() => {
@@ -149,17 +175,39 @@ export default function Popup() {
         : {}),
     };
     handedOffRef.current = true;
+    ttsStop();
     drop();
     api.openMainWithText(handoff);
     api.popupClose();
   };
 
   const switchToShot = () => {
+    ttsStop();
     api.popupClose();
     api.shotStart();
   };
 
   const source = payload?.text ?? "";
+  const sourceLang: TtsLang | null =
+    choice === "zh2En"
+      ? "zh"
+      : choice === "en2Zh"
+        ? "en"
+        : !state.mixed && state.direction === "zh2En"
+          ? "zh"
+          : !state.mixed && state.direction === "en2Zh"
+            ? "en"
+            : null;
+  const targetLang: TtsLang | null =
+    choice === "zh2En"
+      ? "en"
+      : choice === "en2Zh"
+        ? "zh"
+        : !state.mixed && state.direction === "zh2En"
+          ? "en"
+          : !state.mixed && state.direction === "en2Zh"
+            ? "zh"
+            : null;
 
   return (
     <div ref={rootRef} className="flyout-frame flex flex-col text-sm">
@@ -183,6 +231,15 @@ export default function Popup() {
           <span data-tauri-drag-region className="flex-1 px-1 text-xs font-medium text-[var(--ink-secondary)]">
             划词翻译
           </span>
+        )}
+
+        {source && (
+          <SpeakButton
+            size="sm"
+            phase={tts.phaseOf("popup:source")}
+            title="朗读原文"
+            onClick={() => tts.toggle("popup:source", source, { lang: sourceLang })}
+          />
         )}
 
         {source && <DirCycleButton choice={choice} onClick={cycleChoice} />}
@@ -264,9 +321,22 @@ export default function Popup() {
       {/* Footer */}
       {source && (
         <div className="flex h-10 items-center gap-1 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]/75 px-2.5 text-xs">
-          <span className="min-w-0 flex-1 truncate px-1 text-[var(--ink-muted)] tabular-nums">
-            {footerText(state)}
-          </span>
+          {tts.error ? (
+            <span className="min-w-0 flex-1 truncate px-1 text-[var(--danger)]" title={tts.error}>
+              {tts.error}
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 truncate px-1 text-[var(--ink-muted)] tabular-nums">
+              {footerText(state)}
+            </span>
+          )}
+          <SpeakButton
+            size="sm"
+            phase={tts.phaseOf("popup:result")}
+            disabled={!state.result.trim() || state.busy}
+            title="朗读译文"
+            onClick={() => tts.toggle("popup:result", state.result, { lang: targetLang })}
+          />
           {state.busy ? (
             <IconButton size="sm" title="停止" onClick={stop}>
               <Square className="size-3.5" />

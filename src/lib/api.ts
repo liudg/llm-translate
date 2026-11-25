@@ -5,6 +5,46 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export type Backend = "vulkan" | "cpu";
 export type Direction = "zh2En" | "en2Zh";
 export type Theme = "system" | "light" | "dark";
+export type TtsLang = "zh" | "en";
+
+export interface TtsSettings {
+  zhVoice: string;
+  enVoice: string;
+  rate: number;
+  popupAutoSpeak: boolean;
+}
+
+export interface TtsPatch {
+  zhVoice?: string;
+  enVoice?: string;
+  rate?: number;
+  popupAutoSpeak?: boolean;
+}
+
+export interface VoiceInfo {
+  id: string;
+  label: string;
+  desc: string;
+  lang: TtsLang;
+  badge: string | null;
+}
+
+export interface VoiceCatalog {
+  zh: VoiceInfo[];
+  en: VoiceInfo[];
+}
+
+export interface TtsRequest {
+  sessionId: string;
+  text: string;
+  lang?: TtsLang | null;
+  voice?: string | null;
+  rate?: number | null;
+}
+
+export interface TtsStopEvent {
+  exceptSessionId: string | null;
+}
 
 export interface Settings {
   deployed: boolean;
@@ -17,6 +57,7 @@ export interface Settings {
   theme: Theme;
   selection: SelectionSettings;
   hotkeys: HotkeySettings;
+  tts: TtsSettings;
   trayHintShown: boolean;
   ignoredUpdateVersion: string | null;
 }
@@ -277,6 +318,10 @@ export const api = {
   setInference: (backend: Backend, device: string | null, threads: number) =>
     invoke<void>("set_inference", { backend, device, threads }),
   setSelection: (patch: SelectionPatch) => invoke<void>("set_selection", { patch }),
+  setTts: (patch: TtsPatch) => invoke<void>("set_tts", { patch }),
+  ttsVoices: () => invoke<VoiceCatalog>("tts_voices"),
+  ttsSynthesize: (req: TtsRequest) => invoke<ArrayBuffer>("tts_synthesize", { req }),
+  ttsStop: (sessionId?: string) => invoke<void>("tts_stop", { sessionId: sessionId ?? null }),
   windowProcesses: () => invoke<WindowProcess[]>("window_processes"),
   popupSetHeight: (height: number) => invoke<void>("popup_set_height", { height }),
   popupSetPinned: (pinned: boolean) => invoke<void>("popup_set_pinned", { pinned }),
@@ -327,6 +372,7 @@ export const events = {
   openTranslate: (cb: (p: OpenTranslatePayload) => void) =>
     listen<OpenTranslatePayload>("open-translate", (e) => cb(e.payload)),
   updateState: (cb: (s: UpdateSnapshot) => void) => listen<UpdateSnapshot>("update-state", (e) => cb(e.payload)),
+  ttsStop: (cb: (e: TtsStopEvent) => void) => listen<TtsStopEvent>("tts-stop", (e) => cb(e.payload)),
 };
 
 /** Tauri rejects with the serialized error value; normalize to text. */

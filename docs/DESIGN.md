@@ -89,6 +89,7 @@
 │ deploy    硬件检测 · 模型清单 · 镜像测速 · 断点续传 · SHA256 · 向导状态机  │
 │ inference llama-server 守护（启动/健康检查/重启/降级）· 流式客户端 · 取消  │
 │ translate 语言判定 · 分段 · 提示词 · LRU 缓存 · 请求调度（新请求顶替旧请求）│
+│ tts       Edge Read Aloud v2 直连 · 音色目录 · 24 MiB 音频缓存 · 跨窗互斥   │
 │ selection 鼠标钩子线程 · UIA 线程 · 安全复制 · 黑名单                      │
 │ capture   GDI 截屏 · 原生选区遮罩 · OCR · 段落合并 · 背景/文字色估计        │
 └───────────────┬──────────────────────────────┬──────────────────────┘
@@ -111,6 +112,7 @@ llm-translate/
 │  │  ├─ deploy/     hardware.rs manifest.rs downloader.rs wizard.rs
 │  │  ├─ inference/  supervisor.rs client.rs
 │  │  ├─ translate/  detect.rs segment.rs prompt.rs scheduler.rs cache.rs
+│  │  ├─ tts/        mod.rs drm.rs edge.rs voices.rs
 │  │  ├─ selection/  hook.rs icon.rs uia.rs clipboard.rs input.rs blacklist.rs
 │  │  └─ capture/    screen.rs overlay.rs ocr.rs layout.rs
 │  ├─ resources/     llama/cpu/ llama/vulkan/ ocr/ models.json
@@ -266,7 +268,7 @@ M5 实现（需求方确认，2026-11-20：关闭主窗口隐藏到托盘并首�
 
 ### 5.8 设置页
 
-常规（自启、主题）· 快捷键 · 划词（开关、黑名单、触发方式细项）· 模型（已下载列表、下载/切换/删除、后端选择、闲置释放）· 关于（版本、日志目录）。
+常规（自启、主题）· 快捷键 · 划词（开关、黑/白名单）· 语音朗读（中/英文音色试听、语速、划词自动朗读）· 模型（已下载列表、下载/切换/删除、后端选择、闲置释放）· 关于（版本、更新、日志目录）。
 
 - 设置页是主窗口内的一个页面（左侧导航切换），Win11 设置风格的分组卡片。
 - M2 可用：
@@ -281,6 +283,14 @@ M5 实现（需求方确认，2026-11-20：关闭主窗口隐藏到托盘并首�
   - 模型管理：模型分组顶部列出 `models.json` 中全部模型，显示大小、建议显存 / 内存与状态（使用中 / 已下载 / 已下载 n% / 未下载）。未下载可"下载"，部分下载可"继续下载"（断点续传）或删除；下载中显示进度、速度与下载源，可暂停 / 取消（取消删除 `.part`）。已下载可"使用"：按已保存的后端与向导相同的启动 + 自检（翻译"你好，世界"），GPU 失败自动退回 CPU 并提示；CPU 也失败则重新加载原模型并提示"已恢复为原来的模型"，设置只在成功后保存。删除需二次确认；正在使用的模型、正在下载的模型不能删除。模型目录仍只在向导中修改（"重新部署"）。
 - llama-server 的错误日志带 ANSI 颜色码，拼进界面错误信息前先去掉（M5 发现，向导错误面板同样受益）。
 - 每次设置变更都广播 `settings-changed` 事件，各窗口据此同步（含 GPU 失败自动退回 CPU 的变更）。
+
+### 5.9 语音朗读（tts）
+
+- **协议与网络**：仅接入微软 Edge Read Aloud 在线神经语音（`speech.platform.bing.com` WebSocket，`audio-24khz-48kbitrate-mono-mp3`），无需 API Key、无离线兜底、纯直连不走代理。Rust 端实现 `Sec-MS-GEC` v2（CS64 + 定制 SHA-256，`2-143.0.3650.75`）、随机 `muid` Cookie 及 HTTP 403 `Date` 响应头时钟偏差自动校正。
+- **语种与音色**：明确方向直接指定中/英，自动或混排复用 `translate::detect`；内置精选中文（默认 `zh-CN-XiaoxiaoNeural`）与英文（默认 `en-US-AriaNeural`）音色，支持 `0.75× / 0.9× / 1.0× / 1.25× / 1.5×` SSML 原生语速调节与设置页一键试听。
+- **缓存与播放**：Rust 端按 `(text, voice, rate)` 维护 24 MiB 内存 LRU MP3 缓存并通过二进制 IPC 返回；前端 WebView 使用单例 `HTMLAudioElement` 播放，长文本（> 260 字）按段落和句末标点切分并双缓冲预取下一片。
+- **跨窗互斥与生命周期**：Rust 维护单会话所有权，任意窗口发起新朗读时取消旧合成并广播 `tts-stop`；划词浮窗、迷你窗、截图结果窗及主窗口隐藏时立即停止所属朗读，互不误伤其他窗口。
+- **入口覆盖**：主窗口（原文 + 译文）、历史记录抽屉（每条原文 + 译文）、划词浮窗（原文 + 译文，支持“划词自动朗读”开关，默认关闭）、迷你窗（原文 + 译文）、截图结果窗（HUD 智能按钮：当前显示译文面读译文、切到原图面读识别原文）。
 
 ## 6. 安装包
 

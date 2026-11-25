@@ -15,6 +15,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Volume2,
   X,
 } from "lucide-react";
 import {
@@ -26,11 +27,14 @@ import {
   type HotkeyInfo,
   type SelectionPatch,
   type Theme,
+  type TtsPatch,
+  type VoiceCatalog,
   type WindowProcess,
 } from "../../lib/api";
 import { mbToGb } from "../../lib/format";
 import { useCopy } from "../../lib/useCopy";
 import { isImeComposing } from "../../lib/useTranslator";
+import { useTts } from "../../lib/useTts";
 import {
   Badge,
   BrandSeal,
@@ -43,13 +47,14 @@ import {
   Toggle,
   type SelectOption,
 } from "../../components/ui";
+import { SpeakButton } from "../../components/tts";
 import { StatusChip } from "../../components/status";
 import { useSettings } from "../../stores/settings";
 import { downloadProgress, useUpdater } from "../../stores/updater";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { ModelList } from "./ModelList";
 
-export type SettingsSection = "general" | "hotkeys" | "selection" | "models" | "about";
+export type SettingsSection = "general" | "hotkeys" | "selection" | "tts" | "models" | "about";
 
 const IDLE_CHOICES = [0, 5, 10, 30, 60];
 
@@ -57,6 +62,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: typeof Palette }[] 
   { id: "general", label: "常规与外观", icon: Palette },
   { id: "hotkeys", label: "全局快捷键", icon: Keyboard },
   { id: "selection", label: "划词翻译", icon: MousePointerClick },
+  { id: "tts", label: "语音朗读", icon: Volume2 },
   { id: "models", label: "模型与推理", icon: Cpu },
   { id: "about", label: "关于与更新", icon: Info },
 ];
@@ -405,6 +411,149 @@ const FILTER_MODES: { value: FilterMode; label: string }[] = [
   { value: "blacklist", label: "黑名单模式" },
   { value: "whitelist", label: "白名单模式" },
 ];
+
+const TTS_RATES: { value: string; label: string; rate: number }[] = [
+  { value: "0.75", label: "0.75×", rate: 0.75 },
+  { value: "0.9", label: "0.9×", rate: 0.9 },
+  { value: "1", label: "1.0×", rate: 1.0 },
+  { value: "1.25", label: "1.25×", rate: 1.25 },
+  { value: "1.5", label: "1.5×", rate: 1.5 },
+];
+
+const PREVIEW_EN = "Hello! Welcome to LLM Translate. Clear pronunciation makes reading effortless.";
+const PREVIEW_ZH = "你好，欢迎使用本地大模型翻译，微软神经语音让朗读自然流畅。";
+
+function TtsSection({ active }: { active: boolean }) {
+  const settings = useSettings((s) => s.settings);
+  const [catalog, setCatalog] = useState<VoiceCatalog | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const tts = useTts();
+  const stopPreview = tts.stopIfKeyPrefix;
+
+  useEffect(() => {
+    api.ttsVoices().then(setCatalog).catch((e) => setSaveError(errorText(e)));
+  }, []);
+
+  useEffect(() => {
+    if (!active) stopPreview("preview:");
+    return () => stopPreview("preview:");
+  }, [active, stopPreview]);
+
+  const enOptions = useMemo<SelectOption<string>[]>(
+    () =>
+      (catalog?.en ?? []).map((v) => ({
+        value: v.id,
+        label: v.label,
+        desc: v.desc,
+        badge: v.badge ?? undefined,
+      })),
+    [catalog],
+  );
+
+  const zhOptions = useMemo<SelectOption<string>[]>(
+    () =>
+      (catalog?.zh ?? []).map((v) => ({
+        value: v.id,
+        label: v.label,
+        desc: v.desc,
+        badge: v.badge ?? undefined,
+      })),
+    [catalog],
+  );
+
+  if (!settings) return null;
+  const cfg = settings.tts;
+
+  const patch = (p: TtsPatch) => {
+    setSaveError(null);
+    api.setTts(p).catch((e) => setSaveError(errorText(e)));
+  };
+
+  const closestRate = TTS_RATES.reduce((best, cur) =>
+    Math.abs(cur.rate - cfg.rate) < Math.abs(best.rate - cfg.rate) ? cur : best,
+  ).value;
+
+  const previewError = tts.error && tts.errorKey?.startsWith("preview:") ? tts.error : null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <SectionHeader title="语音朗读" />
+
+      <div className="flex flex-col gap-2.5">
+        <SettingRow title="英文音色" desc="朗读英文原文或译文时使用的微软神经语音">
+          <CustomSelect
+            value={cfg.enVoice}
+            options={enOptions}
+            disabled={!catalog}
+            onChange={(v) => patch({ enVoice: v })}
+            className="w-[188px]"
+            menuClassName="w-[240px]"
+          />
+          <SpeakButton
+            size="md"
+            label="试听"
+            phase={tts.phaseOf("preview:en")}
+            title="试听当前英文音色"
+            onClick={() =>
+              tts.toggle("preview:en", PREVIEW_EN, { lang: "en", voice: cfg.enVoice, rate: cfg.rate })
+            }
+            className="border border-[var(--border)] bg-[var(--bg-surface-alt)]"
+          />
+        </SettingRow>
+
+        <SettingRow title="中文音色" desc="朗读中文原文或译文时使用的微软神经语音">
+          <CustomSelect
+            value={cfg.zhVoice}
+            options={zhOptions}
+            disabled={!catalog}
+            onChange={(v) => patch({ zhVoice: v })}
+            className="w-[188px]"
+            menuClassName="w-[240px]"
+          />
+          <SpeakButton
+            size="md"
+            label="试听"
+            phase={tts.phaseOf("preview:zh")}
+            title="试听当前中文音色"
+            onClick={() =>
+              tts.toggle("preview:zh", PREVIEW_ZH, { lang: "zh", voice: cfg.zhVoice, rate: cfg.rate })
+            }
+            className="border border-[var(--border)] bg-[var(--bg-surface-alt)]"
+          />
+        </SettingRow>
+
+        <SettingRow title="朗读语速" desc="由语音引擎原生调节语速，自然不变调">
+          <Segmented
+            size="sm"
+            value={closestRate}
+            options={TTS_RATES.map((r) => ({ value: r.value, label: r.label }))}
+            onChange={(v) => {
+              const found = TTS_RATES.find((r) => r.value === v);
+              if (found) patch({ rate: found.rate });
+            }}
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="划词自动朗读"
+          desc="打开划词浮窗时自动朗读选中的原文，可随时点击按钮停止"
+        >
+          <Toggle checked={cfg.popupAutoSpeak} onChange={(v) => patch({ popupAutoSpeak: v })} />
+        </SettingRow>
+      </div>
+
+      {(saveError || previewError) && (
+        <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-4 py-2.5 text-xs text-[var(--danger)]">
+          {saveError ?? previewError}
+        </div>
+      )}
+
+      <p className="px-1 text-xs leading-relaxed text-[var(--ink-muted)]">
+        朗读通过直连微软 Edge 在线神经语音服务实现，仅在点击朗读或开启划词自动朗读时联网请求；翻译本身仍完全离线运行。
+      </p>
+    </div>
+  );
+}
 
 function SelectionSection() {
   const settings = useSettings((s) => s.settings);
@@ -944,6 +1093,8 @@ export default function SettingsPage({
           )}
 
           {section === "selection" && <SelectionSection />}
+
+          {section === "tts" && <TtsSection active={visible && section === "tts"} />}
 
           {/* Keep ModelSection mounted once visited so active downloads & hardware info survive tab switching. */}
           {modelsMounted && (

@@ -41,6 +41,7 @@ pub struct Settings {
     pub theme: Theme,
     pub selection: SelectionSettings,
     pub hotkeys: HotkeySettings,
+    pub tts: TtsSettings,
     /// The "still running in the tray" notification was shown once.
     pub tray_hint_shown: bool,
     /// Version tag (e.g. `0.2.0`) the user chose to ignore in the update banner.
@@ -167,6 +168,28 @@ impl Default for SelectionSettings {
     }
 }
 
+/// Read-aloud (Edge TTS) preferences.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TtsSettings {
+    pub zh_voice: String,
+    pub en_voice: String,
+    pub rate: f32,
+    /// Automatically speak selected source text when the selection popup opens.
+    pub popup_auto_speak: bool,
+}
+
+impl Default for TtsSettings {
+    fn default() -> Self {
+        Self {
+            zh_voice: crate::tts::voices::DEFAULT_ZH_VOICE.into(),
+            en_voice: crate::tts::voices::DEFAULT_EN_VOICE.into(),
+            rate: crate::tts::voices::DEFAULT_RATE,
+            popup_auto_speak: false,
+        }
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -181,6 +204,7 @@ impl Default for Settings {
             theme: Theme::System,
             selection: SelectionSettings::default(),
             hotkeys: HotkeySettings::default(),
+            tts: TtsSettings::default(),
             tray_hint_shown: false,
             ignored_update_version: None,
         }
@@ -332,6 +356,17 @@ mod tests {
         assert_eq!(s.selection.mode, FilterMode::Blacklist);
         assert!(s.selection.blacklist.is_empty());
         assert!(s.selection.whitelist.is_empty());
+        assert_eq!(s.tts.zh_voice, crate::tts::voices::DEFAULT_ZH_VOICE);
+        assert_eq!(s.tts.en_voice, crate::tts::voices::DEFAULT_EN_VOICE);
+        assert_eq!(s.tts.rate, 1.0);
+        assert!(!s.tts.popup_auto_speak);
+    }
+
+    #[test]
+    fn legacy_settings_without_tts_get_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"version":3,"deployed":true}"#).unwrap();
+        assert!(s.deployed);
+        assert_eq!(s.tts, TtsSettings::default());
     }
 
     #[test]

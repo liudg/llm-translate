@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { listen } from "@tauri-apps/api/event";
 import { PhysicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import { ArrowUpRight, CornerDownLeft, RotateCw, Square, X } from "lucide-react";
-import { api, events, type OpenTranslatePayload } from "../../lib/api";
+import { api, events, type OpenTranslatePayload, type TtsLang } from "../../lib/api";
 import {
   NEXT_CHOICE,
   footerText,
@@ -16,7 +16,9 @@ import {
 } from "../../lib/useTranslator";
 import { useAutoHeight } from "../../lib/useAutoHeight";
 import { useStreamAutoScroll } from "../../lib/useStreamAutoScroll";
+import { useTts } from "../../lib/useTts";
 import { BrandSeal, IconButton, Kbd } from "../../components/ui";
+import { SpeakButton } from "../../components/tts";
 import { CopyResultButton, DirCycleButton, TranslationBody } from "../../components/translation";
 import { useHistory } from "../../stores/history";
 import { startInferenceSync, useInference } from "../../stores/inference";
@@ -29,6 +31,8 @@ export default function Mini() {
   const [text, setText] = useState("");
   const [choice, setChoice] = useState<DirChoice>("auto");
   const { state, run, stop, clear, drop } = useTranslator();
+  const tts = useTts();
+  const { stop: ttsStop, stopLocal: ttsStopLocal } = tts;
   const status = useInference((s) => s.status);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -46,19 +50,21 @@ export default function Mini() {
   }, [choice, text, run]);
 
   const hideWindow = useCallback(() => {
+    ttsStop();
     if (state.busy) clear();
     win.hide();
-  }, [state.busy, clear, win]);
+  }, [state.busy, clear, win, ttsStop]);
 
   const copyAndHide = useCallback(async () => {
     if (!state.result) return;
+    ttsStop();
     try {
       await navigator.clipboard.writeText(state.result);
     } catch {
       // Ignore clipboard failure.
     }
     win.hide();
-  }, [state.result, win]);
+  }, [state.result, win, ttsStop]);
 
   const openInMain = useCallback(() => {
     const usingCurrentInput = Boolean(text.trim());
@@ -84,10 +90,11 @@ export default function Mini() {
           }
         : {}),
     };
+    ttsStop();
     drop();
     api.openMainWithText(payload);
     win.hide();
-  }, [text, choice, state, drop, win]);
+  }, [text, choice, state, drop, win, ttsStop]);
 
   const handlersRef = useRef({
     copyAndHide,
@@ -111,6 +118,7 @@ export default function Mini() {
       inputRef.current?.select();
     });
     const unHidden = events.miniHidden(() => {
+      ttsStopLocal();
       if (handlersRef.current.shouldDropOnHide) {
         handlersRef.current.drop();
       }
@@ -174,6 +182,26 @@ export default function Mini() {
   });
 
   const showResult = Boolean(state.busy || state.result || state.error || state.stopped);
+  const sourceLang: TtsLang | null =
+    choice === "zh2En"
+      ? "zh"
+      : choice === "en2Zh"
+        ? "en"
+        : !state.mixed && state.direction === "zh2En"
+          ? "zh"
+          : !state.mixed && state.direction === "en2Zh"
+            ? "en"
+            : null;
+  const targetLang: TtsLang | null =
+    choice === "zh2En"
+      ? "en"
+      : choice === "en2Zh"
+        ? "zh"
+        : !state.mixed && state.direction === "zh2En"
+          ? "en"
+          : !state.mixed && state.direction === "en2Zh"
+            ? "zh"
+            : null;
 
   const statusDot =
     status.state === "ready"
@@ -229,11 +257,20 @@ export default function Mini() {
         />
 
         <div className="mt-[4px] flex shrink-0 items-center gap-1">
+          {text.trim() && (
+            <SpeakButton
+              size="sm"
+              phase={tts.phaseOf("mini:source")}
+              title="朗读原文"
+              onClick={() => tts.toggle("mini:source", text, { lang: sourceLang })}
+            />
+          )}
           {text && (
             <IconButton
               size="sm"
               title="清空"
               onClick={() => {
+                ttsStop();
                 setText("");
                 clear();
                 inputRef.current?.focus();
@@ -255,10 +292,17 @@ export default function Mini() {
         </div>
       </div>
 
+      {!showResult && tts.error && (
+        <div className="border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-4 py-1.5 text-xs text-[var(--danger)]">
+          {tts.error}
+        </div>
+      )}
+
       {/* Expandable result sheet */}
       {showResult && (
         <MiniResultSheet
           state={state}
+          targetLang={targetLang}
           canRetry={Boolean(text.trim())}
           onOpenInMain={openInMain}
           onStop={stop}
@@ -271,18 +315,21 @@ export default function Mini() {
 
 function MiniResultSheet({
   state,
+  targetLang,
   canRetry,
   onOpenInMain,
   onStop,
   onRetry,
 }: {
   state: TranslatorState;
+  targetLang: TtsLang | null;
   canRetry: boolean;
   onOpenInMain: () => void;
   onStop: () => void;
   onRetry: () => void;
 }) {
   const resultRef = useRef<HTMLDivElement>(null);
+  const tts = useTts();
   useStreamAutoScroll(resultRef, state.busy, state.result);
 
   return (
@@ -299,16 +346,30 @@ function MiniResultSheet({
       </div>
 
       <div className="flex h-10 items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 text-xs">
-        <span className="min-w-0 flex-1 truncate px-1 text-[var(--ink-muted)] tabular-nums">
-          {footerText(state)}
-        </span>
+        {tts.error ? (
+          <span className="min-w-0 flex-1 truncate px-1 text-[var(--danger)]" title={tts.error}>
+            {tts.error}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate px-1 text-[var(--ink-muted)] tabular-nums">
+            {footerText(state)}
+          </span>
+        )}
 
-        {state.result && !state.busy && (
+        {state.result && !state.busy && !tts.error && (
           <span className="hidden items-center gap-1 pr-1 text-[11px] text-[var(--ink-muted)] sm:inline-flex">
             <Kbd keys="Ctrl+Enter" compact />
             <span>复制并关闭</span>
           </span>
         )}
+
+        <SpeakButton
+          size="sm"
+          phase={tts.phaseOf("mini:result")}
+          disabled={!state.result.trim() || state.busy}
+          title="朗读译文"
+          onClick={() => tts.toggle("mini:result", state.result, { lang: targetLang })}
+        />
 
         <IconButton size="sm" title="在主窗口展开" onClick={onOpenInMain}>
           <ArrowUpRight className="size-3.5" />

@@ -10,6 +10,7 @@ use crate::deploy::downloader::Control;
 use crate::deploy::manifest::{Manifest, ModelEntry};
 use crate::inference::supervisor::{LaunchSpec, Supervisor};
 use crate::translate::scheduler::Translator;
+use crate::tts::TtsService;
 
 /// A running model download and which window started it.
 pub struct ActiveDownload {
@@ -24,6 +25,7 @@ pub struct AppState {
     pub llama_exe: PathBuf,
     pub sup: Arc<Supervisor>,
     pub translator: Arc<Translator>,
+    pub tts: Arc<TtsService>,
     pub downloads: Mutex<HashMap<String, ActiveDownload>>,
     pub http: reqwest::Client,
     /// Held by whatever changes which model runs (see `deploy::wizard`).

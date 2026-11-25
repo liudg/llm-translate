@@ -371,6 +371,30 @@ kbd {
   animation: thinking-shimmer 1.6s ease-in-out infinite;
 }
 
+@keyframes tts-bar-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.32);
+  }
+  50% {
+    transform: scaleY(0.95);
+  }
+}
+
+.tts-bar {
+  transform-origin: bottom;
+  animation: tts-bar-bounce 0.85s ease-in-out infinite;
+}
+.tts-bar-1 {
+  animation-delay: 0ms;
+}
+.tts-bar-2 {
+  animation-delay: 180ms;
+}
+.tts-bar-3 {
+  animation-delay: 340ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .progress-indeterminate,
   .stream-caret::after,
@@ -378,7 +402,8 @@ kbd {
   .seam-beam-y[data-active="true"]::after,
   .animate-panel-in,
   .animate-drawer-in,
-  .thinking-line {
+  .thinking-line,
+  .tts-bar {
     animation: none;
   }
   .seam-beam-x[data-active="true"],
