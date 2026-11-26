@@ -145,7 +145,7 @@ export default function Popup() {
   }, [state]);
 
   useStreamAutoScroll(resultRef, state.busy, state.result);
-  useAutoHeight(rootRef, (h) => api.popupSetHeight(h));
+  useAutoHeight(rootRef, (h) => api.popupSetHeight(h), payload?.id ?? 0);
 
   const cycleChoice = () => {
     const c = NEXT_CHOICE[choice];

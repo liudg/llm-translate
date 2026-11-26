@@ -145,16 +145,20 @@ body,
 }
 
 /* Borderless flyouts (mini / popup) size their window to the content; while a resize is
-   in flight the content may be briefly taller, which must not flash a page scrollbar. */
+   in flight the content may be briefly taller, which must not flash a page scrollbar.
+   Paint the flyout backdrop on #root rather than setting min-height: 100% on .flyout-frame,
+   because useAutoHeight measures .flyout-frame directly and must be able to shrink. */
 html:has(.flyout-frame),
 html:has(.flyout-frame) body {
   overflow: hidden;
 }
-
-.flyout-frame {
-  min-height: 100%;
+html:has(.flyout-frame) #root {
   background: var(--bg-flyout-mica);
 }
+:root[data-effect="solid"]:has(.flyout-frame) #root {
+  background: var(--bg-surface);
+}
+
 .flyout-frame::after {
   content: "";
   position: fixed;
@@ -165,9 +169,6 @@ html:has(.flyout-frame) body {
 }
 :root[data-theme="dark"] .flyout-frame::after {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.09);
-}
-:root[data-effect="solid"] .flyout-frame {
-  background: var(--bg-surface);
 }
 :root[data-effect="solid"] :is(.app-shell, .flyout-frame)::after {
   content: "";

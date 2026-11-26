@@ -4,9 +4,14 @@ import { useEffect, useRef, type RefObject } from "react";
  * Report the element's exact CSS height whenever it changes (or when monitor DPI /
  * Windows accessibility text size changes); flyout windows size themselves from it.
  */
-export function useAutoHeight(ref: RefObject<HTMLElement | null>, onHeight: (h: number) => void) {
+export function useAutoHeight(
+  ref: RefObject<HTMLElement | null>,
+  onHeight: (h: number) => void,
+  syncKey?: unknown,
+) {
   const cb = useRef(onHeight);
   cb.current = onHeight;
+  const reportRef = useRef<((force?: boolean) => void) | null>(null);
 
   useEffect(() => {
     const el = ref.current;
@@ -21,6 +26,7 @@ export function useAutoHeight(ref: RefObject<HTMLElement | null>, onHeight: (h: 
         cb.current(h);
       }
     };
+    reportRef.current = report;
 
     const ro = new ResizeObserver(() => report(false));
     ro.observe(el);
@@ -44,9 +50,16 @@ export function useAutoHeight(ref: RefObject<HTMLElement | null>, onHeight: (h: 
     report(false);
 
     return () => {
+      reportRef.current = null;
       window.cancelAnimationFrame(rafId);
       ro.disconnect();
       if (mq && onDprChange) mq.removeEventListener("change", onDprChange);
     };
   }, [ref]);
+
+  useEffect(() => {
+    if (syncKey === undefined) return;
+    const id = window.requestAnimationFrame(() => reportRef.current?.(true));
+    return () => window.cancelAnimationFrame(id);
+  }, [syncKey]);
 }

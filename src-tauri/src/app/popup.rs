@@ -127,9 +127,7 @@ pub fn show_capture(app: &AppHandle, cap: Capture) {
         let keep_place = inner.pinned && visible;
         let place_height = (!keep_place).then(|| {
             inner.pinned = false;
-            if inner.height <= 0.0 {
-                inner.height = INITIAL_HEIGHT;
-            }
+            inner.height = if inner.height > 0.0 { inner.height.min(INITIAL_HEIGHT) } else { INITIAL_HEIGHT };
             inner.height
         });
         (payload, place_height)
@@ -149,9 +147,15 @@ pub fn show_capture(app: &AppHandle, cap: Capture) {
 
 pub fn hide(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(LABEL) {
-        // The page clears itself on `popup-hidden` and reports its smaller
-        // height, so the next capture does not open at the old result's size.
-        app.state::<PopupState>().0.lock().unwrap().pinned = false;
+        // Reset cached height as well as clearing the page: if WebView2
+        // throttles ResizeObserver while hidden, the next capture still opens
+        // compactly instead of flashing the old result's height.
+        {
+            let state = app.state::<PopupState>();
+            let mut inner = state.0.lock().unwrap();
+            inner.pinned = false;
+            inner.height = 0.0;
+        }
         app.state::<AppState>().tts.stop_for(app, LABEL);
         let _ = win.hide();
         let _ = app.emit_to(LABEL, "popup-hidden", ());
@@ -179,7 +183,7 @@ pub fn popup_set_height(app: AppHandle, state: State<'_, PopupState>, height: f6
     let sf = sf * text_scale();
     // `set_size` takes the inner size; positions are of the outer frame,
     // which may be larger (invisible resize borders).
-    let h = (height * sf).round() as i32;
+    let h = (height * sf).ceil() as i32;
     let frame = outer.height as i32 - inner.height as i32;
     let mut y = if above { pos.y + outer.height as i32 - (h + frame) } else { pos.y };
     if let Ok(Some(m)) = win.current_monitor() {
