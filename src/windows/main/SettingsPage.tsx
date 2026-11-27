@@ -70,7 +70,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: typeof Palette }[] 
 function SectionHeader({ title }: { title: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-base font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
+      <h2 className="text-large font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
     </div>
   );
 }
@@ -89,8 +89,8 @@ function SettingRow({
   return (
     <div className="flex min-h-[64px] flex-wrap items-center gap-x-4 gap-y-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 shadow-[var(--shadow-card)]">
       <div className={`min-w-0 flex-1 ${muted ? "opacity-50" : ""}`}>
-        <div className="text-[13.5px] font-medium text-[var(--ink)]">{title}</div>
-        {desc && <div className="mt-0.5 text-xs leading-relaxed text-[var(--ink-secondary)]">{desc}</div>}
+        <div className="text-body font-medium text-[var(--ink)]">{title}</div>
+        {desc && <div className="mt-0.5 text-caption leading-relaxed text-[var(--ink-secondary)]">{desc}</div>}
       </div>
       {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
     </div>
@@ -128,12 +128,12 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
       preview: (
         <div className="flex h-12 w-full flex-col gap-1.5 rounded-lg border border-[#e3ded3] bg-[#f4f1ea] p-2">
           <div className="flex items-center gap-1.5">
-            <div className="size-2.5 rounded-[3px] bg-[#b8431f]" />
+            <div className="size-2.5 rounded-md bg-[#b8431f]" />
             <div className="h-1.5 w-12 rounded-full bg-[#1b1917]/25" />
           </div>
           <div className="flex flex-1 gap-1.5">
-            <div className="flex-1 rounded bg-[#fcfbf8] border border-[#e3ded3]" />
-            <div className="flex-1 rounded bg-[#f8f5ee] border border-[#e3ded3]" />
+            <div className="flex-1 rounded-md bg-[#fcfbf8] border border-[#e3ded3]" />
+            <div className="flex-1 rounded-md bg-[#f8f5ee] border border-[#e3ded3]" />
           </div>
         </div>
       ),
@@ -144,12 +144,12 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
       preview: (
         <div className="flex h-12 w-full flex-col gap-1.5 rounded-lg border border-[#2c2a26] bg-[#121110] p-2">
           <div className="flex items-center gap-1.5">
-            <div className="size-2.5 rounded-[3px] bg-[#e06d48]" />
+            <div className="size-2.5 rounded-md bg-[#e06d48]" />
             <div className="h-1.5 w-12 rounded-full bg-[#eeebe3]/30" />
           </div>
           <div className="flex flex-1 gap-1.5">
-            <div className="flex-1 rounded bg-[#1b1a18] border border-[#2c2a26]" />
-            <div className="flex-1 rounded bg-[#161513] border border-[#2c2a26]" />
+            <div className="flex-1 rounded-md bg-[#1b1a18] border border-[#2c2a26]" />
+            <div className="flex-1 rounded-md bg-[#161513] border border-[#2c2a26]" />
           </div>
         </div>
       ),
@@ -159,7 +159,7 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
   return (
     <Card className="p-4">
       <div className="mb-3">
-        <div className="text-[13.5px] font-medium text-[var(--ink)]">外观主题</div>
+        <div className="text-body font-medium text-[var(--ink)]">外观主题</div>
       </div>
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
         {choices.map((c) => {
@@ -177,7 +177,7 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (t: Theme) =
             >
               {c.preview}
               <div className="flex items-center justify-between px-0.5">
-                <span className={`text-xs font-semibold ${active ? "text-[var(--accent-text)]" : "text-[var(--ink)]"}`}>
+                <span className={`text-caption font-semibold ${active ? "text-[var(--accent-text)]" : "text-[var(--ink)]"}`}>
                   {c.label}
                 </span>
                 {active && (
@@ -342,9 +342,9 @@ function ModelSection() {
         {(dirty || error) && (
           <div className="animate-panel-in flex flex-wrap items-center gap-2 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-soft)] px-4 py-2.5">
             {error ? (
-              <span className="mr-auto text-xs text-[var(--danger)]">{error}</span>
+              <span className="mr-auto text-caption text-[var(--danger)]">{error}</span>
             ) : (
-              <span className="mr-auto text-xs font-medium text-[var(--accent-text)]">
+              <span className="mr-auto text-caption font-medium text-[var(--accent-text)]">
                 配置已更改，应用后生效
               </span>
             )}
@@ -384,7 +384,7 @@ function ModelSection() {
         <SettingRow
           title="模型存储目录"
           desc={
-            <span className="selectable block truncate font-mono text-[11.5px]" title={settings.modelsDir}>
+            <span className="selectable block truncate font-mono text-caption" title={settings.modelsDir}>
               {settings.modelsDir}
             </span>
           }
@@ -540,7 +540,7 @@ function TtsSection({ active }: { active: boolean }) {
       </div>
 
       {(saveError || previewError) && (
-        <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-4 py-2.5 text-xs text-[var(--danger)]">
+        <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-4 py-2.5 text-caption text-[var(--danger)]">
           {saveError ?? previewError}
         </div>
       )}
@@ -595,11 +595,11 @@ function SelectionSection() {
       <Card className={`flex flex-col gap-3.5 p-4 ${off ? "opacity-50" : ""}`}>
         <div className="flex flex-wrap items-start justify-between gap-2.5">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[13.5px] font-medium text-[var(--ink)]">
+            <div className="flex items-center gap-2 text-body font-medium text-[var(--ink)]">
               <span>生效范围</span>
               <Badge>{activeList.length}</Badge>
             </div>
-            <div className="mt-0.5 text-xs leading-relaxed text-[var(--ink-secondary)]">
+            <div className="mt-0.5 text-caption leading-relaxed text-[var(--ink-secondary)]">
               {isWhitelist
                 ? "仅在以下应用中触发划词翻译；右键翻译浮标可快速移出"
                 : "在所有应用中生效，以下应用除外；右键翻译浮标可快速屏蔽"}
@@ -619,7 +619,7 @@ function SelectionSection() {
             {activeList.map((b) => (
               <span
                 key={b}
-                className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] pr-1 pl-2.5 font-mono text-[11.5px] text-[var(--ink)]"
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] pr-1 pl-2.5 font-mono text-caption text-[var(--ink)]"
               >
                 {b}
                 <button
@@ -635,7 +635,7 @@ function SelectionSection() {
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5 text-xs text-[var(--ink-muted)]">
+          <div className="rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5 text-caption text-[var(--ink-muted)]">
             {isWhitelist
               ? "尚未添加应用，白名单为空时不会触发划词翻译"
               : "暂无屏蔽应用（所有支持文字选择的应用均会生效）"}
@@ -651,14 +651,14 @@ function SelectionSection() {
             onKeyDown={(e) => e.key === "Enter" && addManual()}
             placeholder="或输入程序名，如 notepad.exe"
             spellCheck={false}
-            className="h-8 min-w-[180px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] px-2.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-muted)] focus:border-[var(--accent)] focus:bg-[var(--bg-elevated)] focus:ring-2 focus:ring-[var(--accent-ring)]"
+            className="h-8 min-w-[180px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-alt)] px-2.5 text-caption text-[var(--ink)] placeholder:text-[var(--ink-muted)] focus:border-[var(--accent)] focus:bg-[var(--bg-elevated)] focus:ring-2 focus:ring-[var(--accent-ring)]"
           />
           <Button size="sm" icon={<Plus className="size-3.5" />} disabled={off || !manual.trim()} onClick={addManual}>
             添加
           </Button>
         </div>
 
-        {error && <div className="text-xs text-[var(--danger)]">{error}</div>}
+        {error && <div className="text-caption text-[var(--danger)]">{error}</div>}
       </Card>
     </div>
   );
@@ -754,19 +754,19 @@ function ProcessPicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索应用或窗口标题…"
-              className="min-w-0 flex-1 bg-transparent text-xs text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
+              className="min-w-0 flex-1 bg-transparent text-caption text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
             />
           </div>
 
           <div className="max-h-60 overflow-y-auto p-1">
             {filtered === null && (
-              <div className="flex items-center gap-2 px-3 py-3 text-xs text-[var(--ink-muted)]">
+              <div className="flex items-center gap-2 px-3 py-3 text-caption text-[var(--ink-muted)]">
                 <Spinner className="size-3.5" />
                 正在读取活动窗口…
               </div>
             )}
             {filtered?.length === 0 && (
-              <div className="px-3 py-3 text-xs text-[var(--ink-muted)]">没有匹配的可见窗口程序</div>
+              <div className="px-3 py-3 text-caption text-[var(--ink-muted)]">没有匹配的可见窗口程序</div>
             )}
             {filtered?.map((p) => {
               const added = isAdded(p.exe);
@@ -782,10 +782,10 @@ function ProcessPicker({
                   className="flex w-full cursor-pointer flex-col items-start rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <div className="flex w-full items-center gap-2">
-                    <span className="font-mono text-xs font-medium text-[var(--ink)]">{p.exe}</span>
+                    <span className="font-mono text-caption font-medium text-[var(--ink)]">{p.exe}</span>
                     {added && <Badge tone="neutral">已添加</Badge>}
                   </div>
-                  <span className="mt-0.5 w-full truncate text-[11px] text-[var(--ink-muted)]">{p.title}</span>
+                  <span className="mt-0.5 w-full truncate text-caption text-[var(--ink-muted)]">{p.title}</span>
                 </button>
               );
             })}
@@ -847,12 +847,12 @@ function AboutSection({ info }: { info: AppInfo | null }) {
           <BrandSeal size="lg" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-semibold text-[var(--ink)]">LLM Translate</h3>
+              <h3 className="text-large font-semibold text-[var(--ink)]">LLM Translate</h3>
               {info && <Badge tone="neutral">v{info.version}</Badge>}
               {avail && <Badge tone="accent">新版本 v{avail.version}</Badge>}
             </div>
             {statusHint && (
-              <div className="mt-1 text-xs text-[var(--ink-secondary)]">{statusHint}</div>
+              <div className="mt-1 text-caption text-[var(--ink-secondary)]">{statusHint}</div>
             )}
           </div>
 
@@ -897,7 +897,7 @@ function AboutSection({ info }: { info: AppInfo | null }) {
         {installing && <Progress value={1} indeterminate />}
 
         {avail && (avail.notes || avail.pubDate) && (
-          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-3.5 py-2.5 text-xs">
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-3.5 py-2.5 text-caption">
             <div className="mb-1 flex items-center justify-between text-[var(--ink-secondary)]">
               <span className="font-medium text-[var(--ink)]">v{avail.version} 更新内容</span>
               {avail.pubDate && <span className="tabular-nums">{avail.pubDate}</span>}
@@ -915,7 +915,7 @@ function AboutSection({ info }: { info: AppInfo | null }) {
         <SettingRow
           title="配置文件位置"
           desc={
-            <span className="selectable block truncate font-mono text-[11.5px]" title={info?.configDir}>
+            <span className="selectable block truncate font-mono text-caption" title={info?.configDir}>
               {info ? `${info.configDir}\\settings.json` : ""}
             </span>
           }
@@ -926,7 +926,7 @@ function AboutSection({ info }: { info: AppInfo | null }) {
         <SettingRow
           title="运行日志目录"
           desc={
-            <span className="selectable block truncate font-mono text-[11.5px]" title={info?.logsDir}>
+            <span className="selectable block truncate font-mono text-caption" title={info?.logsDir}>
               {info?.logsDir}
             </span>
           }
@@ -1004,7 +1004,7 @@ export default function SettingsPage({
               key={item.id}
               type="button"
               onClick={() => onSectionChange(item.id)}
-              className={`relative flex shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] whitespace-nowrap transition-colors ${
+              className={`relative flex shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-body whitespace-nowrap transition-colors ${
                 active
                   ? "bg-[var(--bg-surface)] font-semibold text-[var(--ink)] shadow-[var(--shadow-xs)]"
                   : "text-[var(--ink-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"

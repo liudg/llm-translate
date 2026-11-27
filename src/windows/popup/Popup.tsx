@@ -210,7 +210,7 @@ export default function Popup() {
             : null;
 
   return (
-    <div ref={rootRef} className="flyout-frame flex flex-col text-sm">
+    <div ref={rootRef} className="flyout-frame flex flex-col text-body">
       {/* Top draggable header */}
       <div data-tauri-drag-region className="flex h-11 items-center gap-1.5 pr-1.5 pl-3">
         <BrandSeal size="xs" className="pointer-events-none" />
@@ -220,7 +220,7 @@ export default function Popup() {
             type="button"
             onClick={() => setExpanded((v) => !v)}
             title={expanded ? "收起原文" : "展开原文"}
-            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-left text-xs text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-left text-caption text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
           >
             <span className="truncate">{source.replace(/\s+/g, " ")}</span>
             <ChevronDown
@@ -228,7 +228,7 @@ export default function Popup() {
             />
           </button>
         ) : (
-          <span data-tauri-drag-region className="flex-1 px-1 text-xs font-medium text-[var(--ink-secondary)]">
+          <span data-tauri-drag-region className="flex-1 px-1 text-caption font-medium text-[var(--ink-secondary)]">
             划词翻译
           </span>
         )}
@@ -267,14 +267,14 @@ export default function Popup() {
       {/* Expandable original source box */}
       {expanded && source && (
         <div className="mx-3 mb-2.5 flex flex-col gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-recessed)]/75 px-3 py-2">
-          <div className="selectable max-h-28 overflow-y-auto text-[13px] leading-relaxed whitespace-pre-wrap text-[var(--ink-secondary)]">
+          <div className="selectable max-h-28 overflow-y-auto text-body leading-relaxed whitespace-pre-wrap text-[var(--ink-secondary)]">
             {source}
           </div>
           <div className="flex justify-end">
             <button
               type="button"
               onClick={() => sourceCopy.copy(source)}
-              className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--ink-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+              className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-caption text-[var(--ink-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
             >
               {sourceCopy.copied ? (
                 <Check className="size-3 text-[var(--good)]" />
@@ -293,11 +293,11 @@ export default function Popup() {
       {/* Translation reading body */}
       <div
         ref={resultRef}
-        className="selectable max-h-[300px] min-h-12 overflow-y-auto bg-[var(--bg-flyout-result)] px-4 py-3.5 text-[15px] leading-[1.72] whitespace-pre-wrap text-[var(--ink)]"
+        className="selectable max-h-[300px] min-h-12 overflow-y-auto bg-[var(--bg-flyout-result)] px-4 py-3.5 text-large leading-[1.72] whitespace-pre-wrap text-[var(--ink)]"
         style={{ fontFamily: "var(--font-reading)" }}
       >
         {payload?.error && (
-          <div className="flex flex-col gap-3 text-xs leading-relaxed">
+          <div className="flex flex-col gap-3 text-caption leading-relaxed">
             <p className="text-[var(--ink-secondary)]">{payload.error}</p>
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="primary" size="sm" icon={<ScanText className="size-3.5" />} onClick={switchToShot}>
@@ -320,7 +320,7 @@ export default function Popup() {
 
       {/* Footer */}
       {source && (
-        <div className="flex h-10 items-center gap-1 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]/75 px-2.5 text-xs">
+        <div className="flex h-10 items-center gap-1 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]/75 px-2.5 text-caption">
           {tts.error ? (
             <span className="min-w-0 flex-1 truncate px-1 text-[var(--danger)]" title={tts.error}>
               {tts.error}

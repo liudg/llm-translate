@@ -127,7 +127,7 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
             }
           : {
               tone: "good",
-              text: `已切换到 ${m.name}（${backendName(out.backend)}，耗时 ${(out.loadMs / 1000).toFixed(1)} 秒）`,
+              text: `已切换到 ${m.name}（${backendName(out.backend)}）`,
             },
       );
     } catch (e) {
@@ -173,7 +173,7 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
             <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-[var(--ink)]">{title}</span>
+                  <span className="text-body font-semibold text-[var(--ink)]">{title}</span>
                   {tier && <Badge tone="neutral">{tier}</Badge>}
                   {current ? (
                     <Badge tone="accent">
@@ -187,7 +187,7 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
                   ) : null}
                 </div>
 
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ink-secondary)] tabular-nums">
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-[var(--ink-secondary)] tabular-nums">
                   <span className="inline-flex items-center gap-1">
                     <HardDrive className="size-3 text-[var(--ink-muted)]" />
                     {gb(m.size)}
@@ -220,13 +220,13 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
                     </Button>
                   </>
                 ) : switching === m.id ? (
-                  <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-text)]">
+                  <span className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-caption font-medium text-[var(--accent-text)]">
                     <Spinner className="size-3.5" />
                     正在加载…
                   </span>
                 ) : confirmDelete === m.id ? (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-[var(--ink-secondary)]">删除后需重新下载</span>
+                    <span className="text-caption text-[var(--ink-secondary)]">删除后需重新下载</span>
                     <Button size="sm" variant="danger" onClick={() => remove(m)}>
                       确认删除
                     </Button>
@@ -270,12 +270,12 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
 
             {t && (
               <div className="flex flex-col gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-3 py-2.5">
-                <div className="flex items-center justify-between text-xs tabular-nums">
+                <div className="flex items-center justify-between text-caption tabular-nums">
                   <span className="font-medium text-[var(--ink)]">{livePct}%</span>
                   <span className="text-[var(--ink-secondary)]">{t.pausing ? "正在暂停…" : t.note}</span>
                 </div>
                 <Progress value={t.total ? t.done / t.total : 0} />
-                <div className="text-[11px] text-[var(--ink-muted)] tabular-nums">
+                <div className="text-micro text-[var(--ink-muted)] tabular-nums">
                   {gb(t.done)} / {gb(t.total)}
                 </div>
               </div>
@@ -286,7 +286,7 @@ export function ModelList({ onBusy }: { onBusy: (busy: boolean) => void }) {
 
       {message && (
         <div
-          className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed ${
+          className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-caption leading-relaxed ${
             message.tone === "good"
               ? "border-[var(--good)]/25 bg-[var(--good-soft)] text-[var(--good)]"
               : message.tone === "warn"

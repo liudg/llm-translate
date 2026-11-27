@@ -220,7 +220,7 @@ export function HotkeyRecorder({
             disabled={busy}
             onClick={recording ? () => stop() : start}
             title={recording ? "Esc 取消 · Backspace 清除" : "点击后按下新的快捷键"}
-            className={`flex h-9 min-w-[146px] cursor-pointer items-center justify-center rounded-lg border px-3 text-xs transition-all ${
+            className={`flex h-9 min-w-[146px] cursor-pointer items-center justify-center rounded-lg border px-3 text-caption transition-all ${
               recording
                 ? "border-[var(--accent)] bg-[var(--accent-soft)] ring-2 ring-[var(--accent-ring)]"
                 : "border-[var(--border)] bg-[var(--bg-surface-alt)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
@@ -260,11 +260,11 @@ export function HotkeyRecorder({
       </div>
 
       {recording && (
-        <span className="text-[11px] text-[var(--ink-muted)]">
+        <span className="text-caption text-[var(--ink-muted)]">
           Esc 取消 · Backspace 清除
         </span>
       )}
-      {error && <span className="max-w-72 text-right text-xs text-[var(--danger)]">{error}</span>}
+      {error && <span className="max-w-72 text-right text-caption text-[var(--danger)]">{error}</span>}
     </div>
   );
 }

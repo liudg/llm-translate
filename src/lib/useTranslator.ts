@@ -148,15 +148,9 @@ export function useTranslator() {
   return { state, run, stop, clear, drop, hydrate };
 }
 
-/** Footer label: the direction a request used and how long it took. */
+/** Flyout footer label: the direction auto mode detected. A locked direction
+ *  already shows on the direction toggle, so it gets no label. */
 export function footerText(s: TranslatorState): string {
-  if (!s.direction) return "";
-  const dir =
-    s.choice !== "auto"
-      ? DIR_LABEL[s.direction]
-      : s.mixed
-        ? "自动 · 中英混合，逐段翻译"
-        : `自动 · ${DIR_LABEL[s.direction]}`;
-  // Under 10 ms nothing was translated (copied through): no time.
-  return s.elapsedMs !== null && s.elapsedMs >= 10 ? `${dir} · ${(s.elapsedMs / 1000).toFixed(2)} 秒` : dir;
+  if (!s.direction || s.choice !== "auto") return "";
+  return s.mixed ? "中英混合，逐段翻译" : DIR_LABEL[s.direction];
 }

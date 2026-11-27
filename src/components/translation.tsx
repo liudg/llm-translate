@@ -23,7 +23,7 @@ export function TranslationBody({
 
       {state.busy && !state.result && (
         <div className="flex flex-col gap-2.5 py-0.5 select-none">
-          <div className="flex items-center gap-2 text-xs font-medium text-[var(--accent-text)]">
+          <div className="flex items-center gap-2 text-caption font-medium text-[var(--accent-text)]">
             <span className="size-1.5 animate-pulse rounded-full bg-[var(--accent)]" />
             <span>{waking ? "正在唤醒本地模型…" : "正在翻译…"}</span>
           </div>
@@ -35,12 +35,12 @@ export function TranslationBody({
       )}
 
       {placeholder && !state.busy && !state.result && !state.error && !state.stopped && (
-        <span className="text-[14px] text-[var(--ink-muted)] select-none">{placeholder}</span>
+        <span className="text-large text-[var(--ink-muted)] select-none">{placeholder}</span>
       )}
 
       {state.error && (
         <div
-          className={`${gap}flex items-start gap-2 rounded-lg border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-3 py-2 text-xs leading-relaxed text-[var(--danger)]`}
+          className={`${gap}flex items-start gap-2 rounded-lg border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-3 py-2 text-caption leading-relaxed text-[var(--danger)]`}
         >
           <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
           <span className="selectable break-all">{state.error}</span>
@@ -48,7 +48,7 @@ export function TranslationBody({
       )}
 
       {state.stopped && (
-        <div className={`${gap}text-xs text-[var(--ink-muted)] select-none`}>
+        <div className={`${gap}text-caption text-[var(--ink-muted)] select-none`}>
           {state.stopped === "user" ? "已停止生成" : "已被其他窗口的新翻译请求中断"}
         </div>
       )}
@@ -72,8 +72,8 @@ export function CopyResultButton({
       type="button"
       disabled={!text}
       onClick={() => copy(text)}
-      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[7px] font-medium whitespace-nowrap transition-[background-color,transform,opacity] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
-        compact ? "h-7 px-2.5 text-xs" : "h-7 px-3 text-xs"
+      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-[background-color,transform,opacity] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
+        compact ? "h-7 px-2.5 text-caption" : "h-7 px-3 text-caption"
       } ${
         copied
           ? "bg-[var(--good)] text-white"
@@ -102,7 +102,7 @@ export function DirCycleButton({
       type="button"
       onClick={onClick}
       title="切换翻译方向（自动 / 中→英 / 英→中）"
-      className={`inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-[7px] border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
+      className={`inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 text-caption font-medium whitespace-nowrap transition-colors ${
         isLocked
           ? "border-[var(--accent)]/35 bg-[var(--accent-soft)] text-[var(--accent-text)]"
           : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--ink-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--ink)]"

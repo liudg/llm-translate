@@ -321,7 +321,7 @@ export default function Shot() {
       >
         <div
           data-tauri-drag-region
-          className="pointer-events-auto relative flex w-max items-center gap-1 overflow-hidden rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-surface)]/96 px-1.5 text-xs text-[var(--ink)] shadow-[0_3px_10px_rgb(0_0_0/0.14),0_1px_2px_rgb(0_0_0/0.08)] dark:shadow-[0_3px_10px_rgb(0_0_0/0.40),0_1px_2px_rgb(0_0_0/0.24)]"
+          className="pointer-events-auto relative flex w-max items-center gap-1 overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)]/96 px-1.5 text-caption text-[var(--ink)] shadow-[0_3px_10px_rgb(0_0_0/0.14),0_1px_2px_rgb(0_0_0/0.08)] dark:shadow-[0_3px_10px_rgb(0_0_0/0.40),0_1px_2px_rgb(0_0_0/0.24)]"
           style={barStyle}
         >
         {/* Subtle drag handle & live status */}
@@ -342,7 +342,7 @@ export default function Shot() {
           )}
           <span
             data-tauri-drag-region
-            className="truncate text-[12px] font-medium text-[var(--ink-secondary)] tabular-nums"
+            className="truncate text-caption font-medium text-[var(--ink-secondary)] tabular-nums"
             title={typeof statusText === "string" ? statusText : (tts.error ?? error ?? "")}
           >
             {statusText}
@@ -352,7 +352,7 @@ export default function Shot() {
         {/* Tactile 译文 / 原图 segmented toggle (also supports holding Space) */}
         <div
           title="切换显示译文或原图（按住空格键可临时透视对比）"
-          className={`inline-flex shrink-0 items-center rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-recessed)] p-[2px] ${
+          className={`inline-flex shrink-0 items-center rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-recessed)] p-[2px] ${
             !hasTranslations ? "opacity-45" : ""
           }`}
         >
@@ -363,7 +363,7 @@ export default function Shot() {
               blurOnMouseClick(e);
               setOriginal(false);
             }}
-            className={`h-6 cursor-pointer rounded-[5px] px-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+            className={`h-6 cursor-pointer rounded-md px-2 text-caption font-medium transition-colors disabled:cursor-not-allowed ${
               !showOriginal
                 ? "bg-[var(--bg-elevated)] text-[var(--ink)] shadow-[var(--shadow-xs)]"
                 : "text-[var(--ink-secondary)] hover:text-[var(--ink)]"
@@ -378,7 +378,7 @@ export default function Shot() {
               blurOnMouseClick(e);
               setOriginal(true);
             }}
-            className={`h-6 cursor-pointer rounded-[5px] px-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+            className={`h-6 cursor-pointer rounded-md px-2 text-caption font-medium transition-colors disabled:cursor-not-allowed ${
               showOriginal
                 ? "bg-[var(--bg-elevated)] text-[var(--accent-text)] shadow-[var(--shadow-xs)]"
                 : "text-[var(--ink-secondary)] hover:text-[var(--ink)]"

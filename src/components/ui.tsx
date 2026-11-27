@@ -17,8 +17,8 @@ const variants: Record<Variant, string> = {
 };
 
 const sizes: Record<Size, string> = {
-  sm: "h-7 rounded-[7px] px-2.5 text-xs gap-1.5",
-  md: "h-8 rounded-lg px-3 text-[13px] gap-1.5",
+  sm: "h-7 rounded-md px-2.5 text-caption gap-1.5",
+  md: "h-8 rounded-lg px-3 text-body gap-1.5",
 };
 
 /** Signature Vermilion Seal Emblem ("译") — custom engraved geometric SVG seal. */
@@ -31,12 +31,12 @@ export function BrandSeal({
 }) {
   const box =
     size === "xs"
-      ? "size-5 rounded-[5px]"
+      ? "size-5 rounded-md"
       : size === "sm"
-        ? "size-6 rounded-[6px]"
+        ? "size-6 rounded-md"
         : size === "lg"
-          ? "size-10 rounded-[10px]"
-          : "size-7 rounded-[7px]";
+          ? "size-10 rounded-xl"
+          : "size-7 rounded-lg";
   return (
     <span
       aria-hidden="true"
@@ -170,7 +170,7 @@ export function Badge({
   };
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] leading-tight font-medium whitespace-nowrap ${tones[tone]} ${className}`}
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-caption leading-tight font-medium whitespace-nowrap ${tones[tone]} ${className}`}
     >
       {children}
     </span>
@@ -188,7 +188,7 @@ export function IconButton({
   size?: "sm" | "md";
   children: ReactNode;
 }) {
-  const dim = size === "sm" ? "size-7 rounded-[7px]" : "size-8 rounded-lg";
+  const dim = size === "sm" ? "size-7 rounded-md" : "size-8 rounded-lg";
   return (
     <button
       className={`inline-flex shrink-0 cursor-pointer items-center justify-center transition-colors duration-150 disabled:pointer-events-none disabled:opacity-35 ${dim} ${
@@ -219,11 +219,11 @@ export function Segmented<T extends string>({
   size?: "sm" | "md";
   className?: string;
 }) {
-  const h = size === "sm" ? "h-6 text-xs px-2.5" : "h-7 text-[13px] px-3";
+  const h = size === "sm" ? "h-6 text-caption px-2.5" : "h-7 text-body px-3";
   return (
     <div
       role="tablist"
-      className={`inline-flex items-center gap-0.5 rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-recessed)] p-[3px] ${className}`}
+      className={`inline-flex items-center gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-recessed)] p-[3px] ${className}`}
     >
       {options.map((o) => {
         const active = o.value === value;
@@ -236,7 +236,7 @@ export function Segmented<T extends string>({
             aria-selected={active}
             title={o.title}
             onClick={() => !disabled && onChange(o.value)}
-            className={`relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[6px] whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 disabled:pointer-events-none ${h} ${
+            className={`relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 disabled:pointer-events-none ${h} ${
               active
                 ? "bg-[var(--bg-elevated)] font-medium text-[var(--ink)] shadow-[var(--shadow-xs)]"
                 : "text-[var(--ink-secondary)] hover:text-[var(--ink)]"
@@ -395,7 +395,7 @@ export function CustomSelect<T extends string | number = string>({
             openMenu();
           }
         }}
-        className={`flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border px-2.5 text-left text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border px-2.5 text-left text-body transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
           open
             ? "border-[var(--accent)] bg-[var(--bg-elevated)] ring-2 ring-[var(--accent-ring)]"
             : "border-[var(--border)] bg-[var(--bg-surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)]"
@@ -445,15 +445,15 @@ export function CustomSelect<T extends string | number = string>({
                 }`}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 text-[13px] leading-snug">
+                  <div className="flex items-center gap-1.5 text-body leading-snug">
                     <span className={`truncate ${selected ? "font-medium" : ""}`}>{o.label}</span>
                     {o.badge && (
-                      <span className="shrink-0 rounded bg-[var(--bg-recessed)] px-1.5 py-px text-[10px] font-medium text-[var(--ink-secondary)]">
+                      <span className="shrink-0 rounded-md bg-[var(--bg-recessed)] px-1.5 py-px text-caption font-medium text-[var(--ink-secondary)]">
                         {o.badge}
                       </span>
                     )}
                   </div>
-                  {o.desc && <div className="mt-0.5 truncate text-[11px] text-[var(--ink-muted)]">{o.desc}</div>}
+                  {o.desc && <div className="mt-0.5 truncate text-caption text-[var(--ink-muted)]">{o.desc}</div>}
                 </div>
                 {selected && <Check className="size-3.5 shrink-0 text-[var(--accent)]" />}
               </button>
@@ -513,8 +513,8 @@ export function Kbd({
       {parts.map((k, i) => (
         <kbd
           key={`${k}-${i}`}
-          className={`inline-flex items-center justify-center rounded-[5px] border border-[var(--border-strong)]/80 border-b-2 bg-[var(--bg-surface)] font-medium text-[var(--ink-secondary)] shadow-[inset_0_1px_0_rgb(255_255_255/0.4)] dark:shadow-none ${
-            compact ? "h-[18px] min-w-[18px] px-1 text-[10px]" : "h-5 min-w-5 px-1.5 text-[11px]"
+          className={`inline-flex items-center justify-center rounded-md border border-[var(--border-strong)]/80 border-b-2 bg-[var(--bg-surface)] font-medium text-[var(--ink-secondary)] shadow-[inset_0_1px_0_rgb(255_255_255/0.4)] dark:shadow-none ${
+            compact ? "h-[18px] min-w-[18px] px-1 text-micro" : "h-5 min-w-5 px-1.5 text-micro"
           }`}
         >
           {k}

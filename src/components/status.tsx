@@ -47,7 +47,7 @@ export function StatusChip({ className = "" }: { className?: string }) {
   const [dot, text] = statusView(status);
   return (
     <span
-      className={`inline-flex min-w-0 items-center gap-1.5 text-xs font-normal ${
+      className={`inline-flex min-w-0 items-center gap-1.5 text-caption font-normal ${
         status.state === "failed" ? "text-[var(--danger)]" : "text-[var(--ink-secondary)]"
       } ${className}`}
       title={text}
@@ -76,7 +76,7 @@ export function StatusPill({
       onClick={onClick}
       aria-label={fullText}
       title={`${fullText}${onClick ? "（点击查看模型设置）" : ""}`}
-      className={`inline-flex h-7 max-w-[190px] cursor-pointer items-center justify-center gap-1.5 rounded-full border bg-[var(--bg-surface)] text-xs transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] hover:text-[var(--ink)] ${
+      className={`inline-flex h-7 max-w-[190px] cursor-pointer items-center justify-center gap-1.5 rounded-full border bg-[var(--bg-surface)] text-caption transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] hover:text-[var(--ink)] ${
         urgent ? "px-2.5" : "w-7 px-0 min-[690px]:w-auto min-[690px]:px-2.5"
       } ${
         status.state === "failed"

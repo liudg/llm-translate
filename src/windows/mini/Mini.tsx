@@ -252,7 +252,7 @@ export default function Mini() {
           }}
           placeholder="输入中文或英文，回车即时翻译…"
           spellCheck={false}
-          className="min-h-[36px] flex-1 resize-none bg-transparent py-[6px] text-[15.5px] leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
+          className="min-h-[36px] flex-1 resize-none bg-transparent py-[6px] text-large leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
           style={{ fontFamily: "var(--font-reading)" }}
         />
 
@@ -285,7 +285,7 @@ export default function Mini() {
             disabled={!text.trim()}
             onClick={submit}
             title="翻译（Enter）"
-            className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[7px] bg-[var(--accent)] text-[var(--ink-inverse)] transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--bg-recessed)] disabled:text-[var(--ink-muted)]"
+            className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md bg-[var(--accent)] text-[var(--ink-inverse)] transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:bg-[var(--bg-recessed)] disabled:text-[var(--ink-muted)]"
           >
             <CornerDownLeft className="size-3.5" />
           </button>
@@ -293,7 +293,7 @@ export default function Mini() {
       </div>
 
       {!showResult && tts.error && (
-        <div className="border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-4 py-1.5 text-xs text-[var(--danger)]">
+        <div className="border-t border-[var(--border-subtle)] bg-[var(--danger-soft)] px-4 py-1.5 text-caption text-[var(--danger)]">
           {tts.error}
         </div>
       )}
@@ -339,13 +339,13 @@ function MiniResultSheet({
 
       <div
         ref={resultRef}
-        className="selectable max-h-[320px] overflow-y-auto px-5 py-3.5 text-[15.5px] leading-[1.74] whitespace-pre-wrap text-[var(--ink)]"
+        className="selectable max-h-[320px] overflow-y-auto px-5 py-3.5 text-large leading-[1.74] whitespace-pre-wrap text-[var(--ink)]"
         style={{ fontFamily: "var(--font-reading)" }}
       >
         <TranslationBody state={state} />
       </div>
 
-      <div className="flex h-10 items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 text-xs">
+      <div className="flex h-10 items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 text-caption">
         {tts.error ? (
           <span className="min-w-0 flex-1 truncate px-1 text-[var(--danger)]" title={tts.error}>
             {tts.error}
@@ -357,7 +357,7 @@ function MiniResultSheet({
         )}
 
         {state.result && !state.busy && !tts.error && (
-          <span className="hidden items-center gap-1 pr-1 text-[11px] text-[var(--ink-muted)] sm:inline-flex">
+          <span className="hidden items-center gap-1 pr-1 text-caption text-[var(--ink-muted)] sm:inline-flex">
             <Kbd keys="Ctrl+Enter" compact />
             <span>复制并关闭</span>
           </span>

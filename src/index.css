@@ -4,6 +4,23 @@
    so a light/dark choice in settings overrides the system. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* Type scale (4 sizes) and corner radii (3 sizes, plus rounded-full for pills and dots).
+   Tailwind's default sizes are reset so off-scale values fail to compile instead of creeping back.
+   text-micro is for Latin letters and digits only (keycaps, counters): Chinese text starts at text-caption. */
+@theme {
+  --text-*: initial;
+  --text-micro: 11px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-body: 13px;
+  --text-large: 15px;
+
+  --radius-*: initial;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
 /* ============================================================================
    「素纸墨韵 · Editorial Paper & Precision Instrument」 Design Tokens
    100% offline Windows-native typography stacks · Win11 Mica & Win10 Solid

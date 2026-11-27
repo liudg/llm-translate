@@ -26,7 +26,7 @@ type Page = "translate" | "settings";
 
 function Banner({ children, onClose }: { children: ReactNode; onClose?: () => void }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-lg border border-[var(--warn)]/25 bg-[var(--warn-soft)] px-3 py-2 text-xs text-[var(--warn)]">
+    <div className="flex items-start gap-2.5 rounded-lg border border-[var(--warn)]/25 bg-[var(--warn-soft)] px-3 py-2 text-caption text-[var(--warn)]">
       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
       <span className="flex-1 leading-relaxed">{children}</span>
       {onClose && (
@@ -61,7 +61,7 @@ function UpdateBanner() {
 
   return (
     <div
-      className={`flex flex-col gap-2 rounded-lg border px-3 py-2 text-xs ${
+      className={`flex flex-col gap-2 rounded-lg border px-3 py-2 text-caption ${
         isError
           ? "border-[var(--danger)]/25 bg-[var(--danger-soft)] text-[var(--danger)]"
           : "border-[var(--accent)]/25 bg-[var(--accent-soft)] text-[var(--ink)]"
@@ -224,7 +224,7 @@ export default function Main() {
           <>
             <div data-tauri-drag-region className="flex items-center gap-2 pr-1">
               <BrandSeal size="sm" className="pointer-events-none" />
-              <span className="pointer-events-none hidden text-[13px] font-semibold tracking-tight text-[var(--ink)] min-[820px]:inline">
+              <span className="pointer-events-none hidden text-body font-semibold tracking-tight text-[var(--ink)] min-[820px]:inline">
                 LLM Translate
               </span>
             </div>
@@ -265,7 +265,7 @@ export default function Main() {
               type="button"
               onClick={toggleLightDark}
               title={isDark ? "切换到宣纸浅色" : "切换到墨砚深色"}
-              className="inline-flex size-7 cursor-pointer items-center justify-center rounded-[7px] text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+              className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
             >
               {isDark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
             </button>

@@ -200,10 +200,10 @@ export default function Wizard() {
         left={
           <div data-tauri-drag-region className="flex items-center gap-2">
             <BrandSeal size="sm" className="pointer-events-none" />
-            <span className="pointer-events-none text-[13px] font-semibold tracking-tight text-[var(--ink)]">
+            <span className="pointer-events-none text-body font-semibold tracking-tight text-[var(--ink)]">
               LLM Translate
             </span>
-            <span className="pointer-events-none text-xs text-[var(--ink-muted)]">· 一键部署</span>
+            <span className="pointer-events-none text-caption text-[var(--ink-muted)]">· 一键部署</span>
           </div>
         }
       />
@@ -212,24 +212,24 @@ export default function Wizard() {
       <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/55 px-7 pt-5 pb-4">
         <div className="mb-4 flex items-baseline justify-between gap-4">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight text-[var(--ink)]">
+            <h1 className="text-large font-semibold tracking-tight text-[var(--ink)]">
               本地离线翻译引擎部署
             </h1>
-            <p className="mt-0.5 text-xs text-[var(--ink-secondary)]">
+            <p className="mt-0.5 text-caption text-[var(--ink-secondary)]">
               离线运行，翻译内容仅保存在本地
             </p>
           </div>
         </div>
 
         {/* 6-step connected progress rail */}
-        <ol className="flex items-center gap-1.5 text-xs">
+        <ol className="flex items-center gap-1.5 text-caption">
           {STEPS.map((s, i) => {
             const completed = i < idx || step === "done";
             const current = i === idx && step !== "done";
             return (
               <li key={s.key} className={`flex items-center gap-1.5 ${i < STEPS.length - 1 ? "flex-1" : ""}`}>
                 <span
-                  className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-colors ${
+                  className={`flex size-5 shrink-0 items-center justify-center rounded-full text-micro font-semibold transition-colors ${
                     completed
                       ? "bg-[var(--accent)] text-[var(--ink-inverse)]"
                       : current
@@ -318,7 +318,7 @@ export default function Wizard() {
             title="校验模型文件"
             detail="正在检查文件完整性，请稍候…"
           >
-            <div className="mb-2 text-2xl font-semibold text-[var(--ink)] tabular-nums">
+            <div className="mb-2 text-large font-semibold text-[var(--ink)] tabular-nums">
               {Math.min(100, Math.round(verify * 100))}%
             </div>
             <Progress value={verify} />
@@ -334,7 +334,7 @@ export default function Wizard() {
           >
             <Progress value={0} indeterminate />
             {fallback && (
-              <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-[var(--warn)]/25 bg-[var(--warn-soft)] p-3.5 text-left text-xs leading-relaxed text-[var(--warn)]">
+              <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-[var(--warn)]/25 bg-[var(--warn-soft)] p-3.5 text-left text-caption leading-relaxed text-[var(--warn)]">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                 <span>GPU 启动失败，已自动回退为 CPU 模式继续部署。原因：{fallback}</span>
               </div>
@@ -370,8 +370,8 @@ function Centered({
 }) {
   return (
     <div className="mx-auto flex max-w-md flex-col items-center pt-12 text-center">
-      <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
-      {detail && <p className="mt-1 mb-6 text-xs leading-relaxed text-[var(--ink-secondary)]">{detail}</p>}
+      <h2 className="text-large font-semibold text-[var(--ink)]">{title}</h2>
+      {detail && <p className="mt-1 mb-6 text-caption leading-relaxed text-[var(--ink-secondary)]">{detail}</p>}
       <div className="w-full">{children}</div>
     </div>
   );
@@ -394,9 +394,9 @@ function SpecTile({
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] font-medium text-[var(--ink-muted)]">{label}</div>
-        <div className="mt-0.5 truncate text-[13px] font-medium text-[var(--ink)]">{value}</div>
-        {sub && <div className="mt-0.5 truncate text-[11px] text-[var(--ink-secondary)] tabular-nums">{sub}</div>}
+        <div className="text-caption font-medium text-[var(--ink-muted)]">{label}</div>
+        <div className="mt-0.5 truncate text-body font-medium text-[var(--ink)]">{value}</div>
+        {sub && <div className="mt-0.5 truncate text-caption text-[var(--ink-secondary)] tabular-nums">{sub}</div>}
       </div>
     </div>
   );
@@ -470,7 +470,7 @@ function Welcome(props: {
           icon={<HardDrive className="size-4" />}
           label="模型目录"
           value={
-            <span className="selectable font-mono text-xs" title={plan.dir}>
+            <span className="selectable font-mono text-caption" title={plan.dir}>
               {plan.dir}
             </span>
           }
@@ -482,12 +482,12 @@ function Welcome(props: {
       <div className="relative overflow-hidden rounded-xl border border-[var(--accent)]/35 bg-[var(--bg-surface)] p-4 shadow-[var(--shadow-card)]">
         <span className="absolute inset-y-0 left-0 w-1 bg-[var(--accent)]" />
         <div className="pl-2">
-          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-[var(--accent-text)]">
+          <div className="mb-1.5 flex items-center gap-1.5 text-caption font-semibold text-[var(--accent-text)]">
             <Sparkles className="size-3.5" />
             <span>硬件匹配推荐方案</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[15px] font-semibold text-[var(--ink)]">
+            <span className="text-large font-semibold text-[var(--ink)]">
               {model?.name ?? rec.modelId}
             </span>
             {model && <Badge>{gb(model.size)}</Badge>}
@@ -497,12 +497,12 @@ function Welcome(props: {
               <Badge tone="warn">已下载 {bytes(model.downloadedBytes)}，支持断点续传</Badge>
             )}
           </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-[var(--ink-secondary)]">{rec.reason}</p>
+          <p className="mt-1.5 text-caption leading-relaxed text-[var(--ink-secondary)]">{rec.reason}</p>
 
           {warnings.map((w) => (
             <p
               key={w}
-              className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-[var(--warn-soft)] px-2.5 py-1.5 text-xs text-[var(--warn)]"
+              className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-[var(--warn-soft)] px-2.5 py-1.5 text-caption text-[var(--warn)]"
             >
               <AlertTriangle className="size-3.5 shrink-0" />
               <span>{w}</span>
@@ -549,7 +549,7 @@ function Customize(props: {
   return (
     <div className="flex flex-col gap-4">
       <section>
-        <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--ink-secondary)]">选择模型档位</h3>
+        <h3 className="mb-2 text-caption font-semibold tracking-wide text-[var(--ink-secondary)]">选择模型档位</h3>
         <div className="flex flex-col gap-2">
           {models.map((m) => {
             const selected = m.id === plan.modelId;
@@ -575,14 +575,14 @@ function Customize(props: {
                   {selected && <Check className="size-2.5" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5 text-[13.5px]">
+                  <div className="flex flex-wrap items-center gap-1.5 text-body">
                     <span className="font-semibold text-[var(--ink)]">{m.name}</span>
                     <Badge>{gb(m.size)}</Badge>
                     {m.id === detect.recommendation.modelId && <Badge tone="accent">推荐</Badge>}
                     {m.installed && <Badge tone="good">已下载</Badge>}
                     {!m.installed && m.downloadedBytes > 0 && <Badge tone="warn">可续传</Badge>}
                   </div>
-                  <div className="mt-1 text-xs text-[var(--ink-secondary)] tabular-nums">
+                  <div className="mt-1 text-caption text-[var(--ink-secondary)] tabular-nums">
                     建议显存 {m.recommendVramGB} GB · 最低内存 {m.minRamGB} GB
                     {ramGb < m.minRamGB && <span className="ml-1.5 font-medium text-[var(--warn)]">· 内存偏紧</span>}
                     {vramShort && <span className="ml-1.5 font-medium text-[var(--warn)]">· 显存可能不足</span>}
@@ -595,7 +595,7 @@ function Customize(props: {
       </section>
 
       <section>
-        <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--ink-secondary)]">推理后端</h3>
+        <h3 className="mb-2 text-caption font-semibold tracking-wide text-[var(--ink-secondary)]">推理后端</h3>
         <div className="flex flex-wrap gap-2">
           {hw.gpus.map((g) => (
             <Choice
@@ -614,16 +614,16 @@ function Customize(props: {
       </section>
 
       <section>
-        <h3 className="mb-2 text-xs font-semibold tracking-wide text-[var(--ink-secondary)]">模型存放目录</h3>
+        <h3 className="mb-2 text-caption font-semibold tracking-wide text-[var(--ink-secondary)]">模型存放目录</h3>
         <div className="flex items-center gap-2">
-          <div className="selectable min-w-0 flex-1 truncate rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 font-mono text-xs text-[var(--ink)]">
+          <div className="selectable min-w-0 flex-1 truncate rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 font-mono text-caption text-[var(--ink)]">
             {plan.dir}
           </div>
           <Button size="sm" icon={<FolderOpen className="size-3.5" />} onClick={pickDir}>
             更改目录
           </Button>
         </div>
-        <p className={`mt-1.5 text-xs tabular-nums ${lowDisk ? "text-[var(--warn)]" : "text-[var(--ink-muted)]"}`}>
+        <p className={`mt-1.5 text-caption tabular-nums ${lowDisk ? "text-[var(--warn)]" : "text-[var(--ink-muted)]"}`}>
           {diskFree !== null ? `磁盘剩余空间 ${gb(diskFree, 1)}` : "无法读取剩余空间"}
           {lowDisk && model && `，当前模型至少需要 ${gb(needBytes(model), 1)}`}
         </p>
@@ -647,7 +647,7 @@ function Choice({ active, onClick, children }: { active: boolean; onClick: () =>
     <button
       type="button"
       onClick={onClick}
-      className={`cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+      className={`cursor-pointer rounded-lg border px-3 py-1.5 text-caption font-medium transition-colors ${
         active
           ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-text)]"
           : "border-[var(--border)] bg-[var(--bg-surface)] text-[var(--ink-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--ink)]"
@@ -679,13 +679,13 @@ function DownloadPanel(props: {
     >
       <Card className="flex flex-col gap-3 p-5 text-left">
         <div className="flex items-baseline justify-between">
-          <span className="text-2xl font-semibold text-[var(--ink)] tabular-nums">{pct}%</span>
+          <span className="text-large font-semibold text-[var(--ink)] tabular-nums">{pct}%</span>
           {transfer && !paused && <Badge tone="neutral">{transfer.source}</Badge>}
         </div>
 
         <Progress value={ratio} indeterminate={!transfer && !paused} />
 
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--ink-secondary)] tabular-nums">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-[var(--ink-secondary)] tabular-nums">
           <span>
             {bytes(done)} / {bytes(total)}
           </span>
@@ -731,8 +731,8 @@ function ErrorPanel({
       <div className="mb-3 flex size-11 items-center justify-center rounded-full bg-[var(--danger-soft)] text-[var(--danger)]">
         <AlertTriangle className="size-5" />
       </div>
-      <h2 className="text-base font-semibold text-[var(--ink)]">部署未能完成</h2>
-      <p className="selectable mt-2 mb-6 rounded-xl border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-4 py-3 text-left text-xs leading-relaxed break-all whitespace-pre-wrap text-[var(--danger)]">
+      <h2 className="text-large font-semibold text-[var(--ink)]">部署未能完成</h2>
+      <p className="selectable mt-2 mb-6 rounded-xl border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-4 py-3 text-left text-caption leading-relaxed break-all whitespace-pre-wrap text-[var(--danger)]">
         {message}
       </p>
       <div className="flex flex-wrap justify-center gap-2">
@@ -771,19 +771,19 @@ function ShortcutTile({
     >
       <div className="flex min-h-[18px] items-center">
         {!loaded ? (
-          <span className="inline-block h-[18px] w-12 rounded bg-[var(--bg-recessed)]" />
+          <span className="inline-block h-[18px] w-12 rounded-md bg-[var(--bg-recessed)]" />
         ) : keys ? (
           <Kbd keys={keys} compact dim={conflict} />
         ) : (
-          <span className="inline-flex h-[18px] items-center rounded bg-[var(--bg-recessed)] px-1.5 text-[10px] font-medium text-[var(--ink-muted)]">
+          <span className="inline-flex h-[18px] items-center rounded-md bg-[var(--bg-recessed)] px-1.5 text-caption font-medium text-[var(--ink-muted)]">
             未绑定
           </span>
         )}
       </div>
-      <div className="mt-1 text-[11px] text-[var(--ink-secondary)]">{label}</div>
+      <div className="mt-1 text-caption text-[var(--ink-secondary)]">{label}</div>
       {conflict && (
         <div
-          className="mt-0.5 text-[10px] leading-tight text-[var(--warn)]"
+          className="mt-0.5 text-caption leading-tight text-[var(--warn)]"
           title={info?.error ?? undefined}
         >
           未生效 · 可在设置中更换
@@ -836,18 +836,18 @@ function Done({
       <div className="mb-2.5 flex size-11 items-center justify-center rounded-full bg-[var(--good-soft)] text-[var(--good)]">
         <Check className="size-5" />
       </div>
-      <h2 className="text-base font-semibold text-[var(--ink)]">本地引擎部署完成</h2>
-      <p className="mt-1 mb-4 text-xs text-[var(--ink-secondary)] tabular-nums">
+      <h2 className="text-large font-semibold text-[var(--ink)]">本地引擎部署完成</h2>
+      <p className="mt-1 mb-4 text-caption text-[var(--ink-secondary)] tabular-nums">
         {model?.name} · {backendName(outcome.backend)} · 启动耗时 {(outcome.loadMs / 1000).toFixed(1)} 秒
       </p>
 
       {/* Bilingual self-test card */}
       <Card className="w-full overflow-hidden text-left">
-        <div className="flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-4 py-2 text-[11px] text-[var(--ink-muted)]">
+        <div className="flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface-alt)] px-4 py-2 text-caption text-[var(--ink-muted)]">
           <span>试译结果</span>
           <span className="font-mono tabular-nums">{outcome.translateMs} ms</span>
         </div>
-        <div className="grid grid-cols-2 divide-x divide-[var(--border-subtle)] text-sm">
+        <div className="grid grid-cols-2 divide-x divide-[var(--border-subtle)] text-body">
           <div className="px-4 py-3 text-[var(--ink-secondary)]">{SELF_TEST_TEXT}</div>
           <div className="selectable px-4 py-3 font-medium text-[var(--ink)]">{outcome.sample}</div>
         </div>
@@ -858,15 +858,15 @@ function Done({
         <ShortcutTile info={miniHotkey} loaded={hotkeys !== null} label="随时呼出迷你窗" />
         <ShortcutTile info={shotHotkey} loaded={hotkeys !== null} label="框选截图覆盖译文" />
         <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
-          <span className="inline-flex h-[18px] items-center rounded bg-[var(--accent)] px-1.5 text-[10px] font-semibold text-[var(--ink-inverse)]">
+          <span className="inline-flex h-[18px] items-center rounded-md bg-[var(--accent)] px-1.5 text-caption font-semibold text-[var(--ink-inverse)]">
             译
           </span>
-          <div className="mt-1 text-[11px] text-[var(--ink-secondary)]">选中文字点击浮标</div>
+          <div className="mt-1 text-caption text-[var(--ink-secondary)]">选中文字点击浮标</div>
         </div>
       </div>
 
       {outcome.fallbackReason && (
-        <div className="mt-3 flex w-full items-start gap-2 rounded-xl border border-[var(--warn)]/25 bg-[var(--warn-soft)] p-3 text-left text-xs leading-relaxed text-[var(--warn)]">
+        <div className="mt-3 flex w-full items-start gap-2 rounded-xl border border-[var(--warn)]/25 bg-[var(--warn-soft)] p-3 text-left text-caption leading-relaxed text-[var(--warn)]">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>
             GPU 启动失败，已改用 CPU 并保存。原因：{outcome.fallbackReason}
@@ -877,8 +877,8 @@ function Done({
 
       <div className="mt-4 flex w-full items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-2.5 text-left">
         <div>
-          <div className="text-xs font-medium text-[var(--ink)]">开机自动启动</div>
-          <div className="text-[11px] text-[var(--ink-muted)]">开机后在后台自动运行</div>
+          <div className="text-caption font-medium text-[var(--ink)]">开机自动启动</div>
+          <div className="text-caption text-[var(--ink-muted)]">开机后在后台自动运行</div>
         </div>
         <Toggle
           checked={autostart ?? false}

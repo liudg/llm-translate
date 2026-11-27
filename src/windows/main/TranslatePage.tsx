@@ -17,7 +17,7 @@ import {
 import { type HotkeyInfo, type OpenTranslatePayload, type TtsLang } from "../../lib/api";
 import { useCopy } from "../../lib/useCopy";
 import { useStreamAutoScroll } from "../../lib/useStreamAutoScroll";
-import { DIR_LABEL, footerText, isImeComposing, useTranslator, type DirChoice } from "../../lib/useTranslator";
+import { DIR_LABEL, isImeComposing, useTranslator, type DirChoice } from "../../lib/useTranslator";
 import { useTts } from "../../lib/useTts";
 import { useHistory, type HistoryItem } from "../../stores/history";
 import { useSettings } from "../../stores/settings";
@@ -28,7 +28,7 @@ import { HistoryDrawer } from "./HistoryDrawer";
 
 const DEBOUNCE_MS = 500;
 const MAX_CHARS = 20000;
-const READING_TEXT_CLASS = "text-[15.5px] leading-[1.78]";
+const READING_TEXT_CLASS = "text-large leading-[1.78]";
 
 export interface IncomingTranslate {
   payload: OpenTranslatePayload;
@@ -269,28 +269,13 @@ export default function TranslatePage({
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, historyOpen, state.result, state.busy, copy, swapTranslation, changeChoice]);
 
-  const paragraphCount = source.trim()
-    ? source.trim().split(/\n\s*\n+/).filter(Boolean).length
-    : 0;
   const nearLimit = source.length > MAX_CHARS * 0.9;
   const pendingInput =
     Boolean(source.trim()) &&
     (source !== state.source || choice !== state.choice || Boolean(state.error) || Boolean(state.stopped)) &&
     !state.busy;
 
-  const sourceLangLabel =
-    choice === "zh2En"
-      ? "中文"
-      : choice === "en2Zh"
-        ? "英语"
-        : state.mixed
-          ? "中英混合"
-          : state.direction === "zh2En"
-            ? "中文（自动）"
-            : state.direction === "en2Zh"
-              ? "英语（自动）"
-              : "自动检测";
-
+  // Null until auto mode has detected a direction.
   const targetLangLabel =
     choice === "zh2En"
       ? "英语"
@@ -302,7 +287,7 @@ export default function TranslatePage({
             ? "英语"
             : state.direction === "en2Zh"
               ? "中文"
-              : "译文";
+              : null;
 
   const canSwap = Boolean(state.result.trim()) && !state.busy;
   const canCopyBilingual = Boolean(state.result.trim()) && Boolean((state.source || source).trim());
@@ -328,38 +313,7 @@ export default function TranslatePage({
             : null;
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col gap-3 px-4 pt-3 pb-4">
-      {/* Compact Studio Control Ribbon */}
-      <div inert={historyOpen} className="flex flex-wrap items-center gap-2">
-        <Segmented<DirChoice>
-          value={choice}
-          onChange={changeChoice}
-          options={[
-            { value: "auto", label: "自动检测", title: "自动判断语言方向（Ctrl+1），中英混排逐段翻译" },
-            { value: "zh2En", label: "中 → 英", title: `${DIR_LABEL.zh2En}（Ctrl+2）` },
-            { value: "en2Zh", label: "英 → 中", title: `${DIR_LABEL.en2Zh}（Ctrl+3）` },
-          ]}
-        />
-
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {/* History drawer button */}
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<Clock className="size-3.5" />}
-            onClick={() => setHistoryOpen(true)}
-            title="查看翻译历史（Ctrl+H）"
-          >
-            <span>历史</span>
-            {historyItems.length > 0 && (
-              <span className="rounded bg-[var(--bg-recessed)] px-1 text-[10px] font-semibold text-[var(--ink-secondary)] tabular-nums">
-                {historyItems.length}
-              </span>
-            )}
-          </Button>
-        </div>
-      </div>
-
+    <div className="relative flex min-h-0 flex-1 flex-col px-4 pt-3 pb-4">
       {/* Unified Editorial Dual-Sheet ("双笺光缝") */}
       <div
         inert={historyOpen}
@@ -367,10 +321,18 @@ export default function TranslatePage({
       >
         {/* Source Sheet */}
         <section className="relative flex min-h-0 flex-1 flex-col bg-[var(--bg-surface)]">
-          {/* Sheet micro-header */}
-          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4">
-            <span className="text-[11px] font-semibold tracking-wide text-[var(--ink-muted)]">原文</span>
-            <span className="text-[11px] text-[var(--ink-secondary)]">· {sourceLangLabel}</span>
+          {/* Sheet header: direction picker + source actions (labels fold away when the sheet is narrow) */}
+          <div className="@container flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4">
+            <Segmented<DirChoice>
+              size="sm"
+              value={choice}
+              onChange={changeChoice}
+              options={[
+                { value: "auto", label: "自动检测", title: "自动判断语言方向（Ctrl+1），中英混排逐段翻译" },
+                { value: "zh2En", label: "中 → 英", title: `${DIR_LABEL.zh2En}（Ctrl+2）` },
+                { value: "en2Zh", label: "英 → 中", title: `${DIR_LABEL.en2Zh}（Ctrl+3）` },
+              ]}
+            />
             <div className="ml-auto flex items-center gap-1">
               <SpeakButton
                 size="xs"
@@ -382,21 +344,23 @@ export default function TranslatePage({
               <button
                 type="button"
                 onClick={pasteClipboard}
+                aria-label="粘贴"
                 title="粘贴剪贴板文本并立即翻译（Ctrl+Shift+V）"
-                className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-[11px] text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+                className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-caption text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
               >
                 <ClipboardPaste className="size-3" />
-                <span>粘贴</span>
+                <span className="hidden @min-[25rem]:inline">粘贴</span>
               </button>
               {source && (
                 <button
                   type="button"
                   onClick={clearAll}
+                  aria-label="清空"
                   title="清空原文"
-                  className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-[11px] text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+                  className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-caption text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
                 >
                   <X className="size-3" />
-                  <span>清空</span>
+                  <span className="hidden @min-[25rem]:inline">清空</span>
                 </button>
               )}
             </div>
@@ -436,7 +400,7 @@ export default function TranslatePage({
 
             {/* Serene empty-state shortcuts whisper */}
             {!source && (
-              <div className="pointer-events-none absolute inset-x-5 bottom-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[11px] text-[var(--ink-muted)]">
+              <div className="pointer-events-none absolute inset-x-5 bottom-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-caption text-[var(--ink-muted)]">
                 {miniKeys && (
                   <span className="inline-flex items-center gap-1.5">
                     <Kbd keys={miniKeys} compact />
@@ -462,7 +426,7 @@ export default function TranslatePage({
           </div>
 
           {/* Source micro-footer */}
-          <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-4 text-xs">
+          <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-4 text-caption">
             {tts.error && tts.errorKey === "main:source" ? (
               <span className="min-w-0 flex-1 truncate text-[var(--danger)]" title={tts.error}>
                 {tts.error}
@@ -474,7 +438,6 @@ export default function TranslatePage({
                 }`}
               >
                 {source.length.toLocaleString()} / {MAX_CHARS.toLocaleString()} 字
-                {paragraphCount > 1 && <span className="ml-1.5 opacity-80">· {paragraphCount} 段</span>}
               </span>
             )}
 
@@ -483,7 +446,7 @@ export default function TranslatePage({
                 type="button"
                 onClick={translateNow}
                 title="立即翻译（Ctrl+Enter）"
-                className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 text-xs font-medium transition-colors ${
+                className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-caption font-medium transition-colors ${
                   pendingInput
                     ? "bg-[var(--accent-soft)] text-[var(--accent-text)] hover:bg-[var(--accent)]/15"
                     : "text-[var(--ink-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
@@ -528,23 +491,34 @@ export default function TranslatePage({
 
         {/* Translation Sheet */}
         <section className="flex min-h-0 flex-1 flex-col bg-[var(--bg-surface-alt)]">
-          {/* Sheet micro-header */}
-          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4">
-            <span className="text-[11px] font-semibold tracking-wide text-[var(--accent-text)]">译文</span>
-            <span className="text-[11px] text-[var(--ink-secondary)]">· {targetLangLabel}</span>
+          {/* Sheet header: target language + history */}
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4">
+            <span className="text-caption font-semibold tracking-wide text-[var(--accent-text)]">译文</span>
+            {targetLangLabel && (
+              <span className="text-caption text-[var(--ink-secondary)]">· {targetLangLabel}</span>
+            )}
 
             <div className="ml-auto flex items-center gap-2">
               {state.busy && (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--accent-text)]">
+                <span className="inline-flex items-center gap-1.5 text-caption font-medium text-[var(--accent-text)]">
                   <span className="size-1.5 animate-pulse rounded-full bg-[var(--accent)]" />
                   生成中
                 </span>
               )}
-              {!state.busy && state.elapsedMs !== null && state.elapsedMs >= 10 && (
-                <span className="rounded bg-[var(--bg-recessed)] px-1.5 py-0.5 font-mono text-[10.5px] text-[var(--ink-secondary)] tabular-nums">
-                  {(state.elapsedMs / 1000).toFixed(2)}s
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                title="查看翻译历史（Ctrl+H）"
+                className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-caption text-[var(--ink-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--ink)]"
+              >
+                <Clock className="size-3" />
+                <span>历史</span>
+                {historyItems.length > 0 && (
+                  <span className="rounded-md bg-[var(--bg-recessed)] px-1 text-micro font-semibold text-[var(--ink-secondary)] tabular-nums">
+                    {historyItems.length}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
 
@@ -558,15 +532,14 @@ export default function TranslatePage({
           </div>
 
           {/* Translation micro-footer */}
-          <div className="flex h-10 shrink-0 items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 text-xs">
+          <div className="flex h-10 shrink-0 items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 text-caption">
+            {/* Direction already shows in the sheet headers; the footer only reports read-aloud errors. */}
             {tts.error && tts.errorKey === "main:result" ? (
               <span className="min-w-0 flex-1 truncate px-1 text-[var(--danger)]" title={tts.error}>
                 {tts.error}
               </span>
             ) : (
-              <span className="min-w-0 flex-1 truncate px-1 text-[var(--ink-muted)] tabular-nums">
-                {footerText(state)}
-              </span>
+              <span className="flex-1" />
             )}
 
             <div className="flex shrink-0 items-center gap-1">
@@ -615,7 +588,7 @@ export default function TranslatePage({
                 disabled={!state.result}
                 onClick={() => copy(state.result)}
                 title="复制译文（Ctrl+Shift+C）"
-                className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-[7px] px-3 text-xs font-medium transition-[background-color,transform,opacity] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-3 text-caption font-medium transition-[background-color,transform,opacity] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
                   copied
                     ? "bg-[var(--good)] text-white"
                     : "bg-[var(--accent)] text-[var(--ink-inverse)] hover:bg-[var(--accent-hover)]"

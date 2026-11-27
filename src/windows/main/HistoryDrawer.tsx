@@ -41,7 +41,7 @@ function HighlightText({ text, query }: { text: string; query: string }) {
         part.toLowerCase() === lower ? (
           <mark
             key={i}
-            className="rounded-[3px] bg-[var(--accent-soft)] px-0.5 text-[var(--accent-text)]"
+            className="rounded-md bg-[var(--accent-soft)] px-0.5 text-[var(--accent-text)]"
           >
             {part}
           </mark>
@@ -92,14 +92,9 @@ function HistoryCard({
       <div className="flex items-center gap-1.5">
         <Badge tone="neutral">{dirLabel}</Badge>
         {originLabel && <Badge tone="accent">{originLabel}</Badge>}
-        <span className="text-[11px] text-[var(--ink-muted)] tabular-nums">
+        <span className="text-caption text-[var(--ink-muted)] tabular-nums">
           {formatRelativeTime(item.timestamp)}
         </span>
-        {item.elapsedMs !== null && item.elapsedMs >= 10 && (
-          <span className="text-[11px] text-[var(--ink-muted)] tabular-nums">
-            · {(item.elapsedMs / 1000).toFixed(2)}s
-          </span>
-        )}
         <div
           className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
           onClick={(e) => e.stopPropagation()}
@@ -133,7 +128,7 @@ function HistoryCard({
       </div>
 
       <div className="flex items-start gap-1.5">
-        <p className="line-clamp-2 min-w-0 flex-1 text-xs leading-relaxed text-[var(--ink-secondary)]">
+        <p className="line-clamp-2 min-w-0 flex-1 text-caption leading-relaxed text-[var(--ink-secondary)]">
           <HighlightText text={item.source} query={query} />
         </p>
         <div
@@ -152,7 +147,7 @@ function HistoryCard({
       </div>
 
       <div className="flex items-start gap-1.5">
-        <p className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-relaxed font-medium text-[var(--ink)]">
+        <p className="line-clamp-2 min-w-0 flex-1 text-body leading-relaxed font-medium text-[var(--ink)]">
           <HighlightText text={item.result} query={query} />
         </p>
         <div
@@ -248,7 +243,7 @@ export function HistoryDrawer({
       >
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4">
           <Clock className="size-4 text-[var(--accent-text)]" />
-          <h2 className="text-sm font-semibold text-[var(--ink)]">翻译历史</h2>
+          <h2 className="text-large font-semibold text-[var(--ink)]">翻译历史</h2>
           {items.length > 0 && <Badge>{items.length}</Badge>}
 
           <div className="ml-auto flex items-center gap-1">
@@ -289,7 +284,7 @@ export function HistoryDrawer({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索原文或译文…"
-              className="min-w-0 flex-1 bg-transparent text-xs text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
+              className="min-w-0 flex-1 bg-transparent text-caption text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
             />
             {query && (
               <button
@@ -303,7 +298,7 @@ export function HistoryDrawer({
             )}
           </div>
           {tts.error && tts.errorKey?.startsWith("history:") && (
-            <div className="mt-2 truncate rounded-lg border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-2.5 py-1.5 text-[11.5px] text-[var(--danger)]">
+            <div className="mt-2 truncate rounded-lg border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-2.5 py-1.5 text-caption text-[var(--danger)]">
               {tts.error}
             </div>
           )}
@@ -316,10 +311,10 @@ export function HistoryDrawer({
               <div className="mb-2.5 flex size-10 items-center justify-center rounded-full bg-[var(--bg-recessed)] text-[var(--ink-muted)]">
                 <Clock className="size-4" />
               </div>
-              <p className="text-xs font-medium text-[var(--ink-secondary)]">
+              <p className="text-caption font-medium text-[var(--ink-secondary)]">
                 {items.length === 0 ? "暂无翻译记录" : "未找到匹配的历史记录"}
               </p>
-              <p className="mt-1 text-[11px] text-[var(--ink-muted)]">
+              <p className="mt-1 text-caption text-[var(--ink-muted)]">
                 {items.length === 0 ? "完成的翻译会自动保存在本地，方便随时回看" : "试试更换其他关键词"}
               </p>
             </div>

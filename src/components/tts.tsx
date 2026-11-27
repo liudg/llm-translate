@@ -42,15 +42,15 @@ export function SpeakButton({
   const iconSize = size === "xs" ? "size-3" : "size-3.5";
   const dim = label
     ? size === "xs"
-      ? "h-6 rounded-md px-2 text-[11px] gap-1"
+      ? "h-6 rounded-md px-2 text-caption gap-1"
       : size === "md"
-        ? "h-8 rounded-lg px-3 text-[13px] gap-1.5"
-        : "h-7 rounded-[7px] px-2.5 text-xs gap-1.5"
+        ? "h-8 rounded-lg px-3 text-body gap-1.5"
+        : "h-7 rounded-md px-2.5 text-caption gap-1.5"
     : size === "xs"
       ? "size-6 rounded-md"
       : size === "md"
         ? "size-8 rounded-lg"
-        : "size-7 rounded-[7px]";
+        : "size-7 rounded-md";
 
   return (
     <button
